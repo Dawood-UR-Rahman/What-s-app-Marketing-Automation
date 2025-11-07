@@ -141,26 +141,31 @@ export default function Connections() {
 
   const handleScanQR = async (connectionId: string) => {
     setSelectedConnection(connectionId);
-    setQrModalOpen(true);
-    setQrLoading(true);
     setQrCode(null);
     setConnectionPhase("generating_qr");
+    setQrLoading(true);
+    
+    // Open modal immediately to show progress
+    setQrModalOpen(true);
 
-    try {
-      const result = await connectionsApi.getQR(connectionId);
-      if (result.qr) {
-        setQrCode(result.qr);
-        setConnectionPhase("waiting_scan");
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to generate QR code",
-        variant: "destructive",
+    // Start QR generation in background - WebSocket will update the QR code
+    connectionsApi.getQR(connectionId)
+      .then((result) => {
+        if (result.qr) {
+          setQrCode(result.qr);
+          setConnectionPhase("waiting_scan");
+        }
+        setQrLoading(false);
+      })
+      .catch((error) => {
+        toast({
+          title: "Error",
+          description: "Failed to generate QR code",
+          variant: "destructive",
+        });
+        setQrLoading(false);
+        setQrModalOpen(false);
       });
-    } finally {
-      setQrLoading(false);
-    }
   };
 
   const handleSettings = (connectionId: string) => {
