@@ -1,0 +1,171 @@
+I want you to create a complete multi-user WhatsApp Web messaging system using the Baileys library (WhatsApp Web Multi-Device).
+Do NOT use the WhatsApp Cloud API. Only WhatsApp Web (Baileys).
+
+Build the solution with the following requirements:
+
+✅ SYSTEM REQUIREMENTS
+1. WhatsApp Connection (QR Based)
+
+Each user can connect their WhatsApp by scanning a QR code.
+
+Generate a unique QR per user.
+
+Save and restore the Baileys session using useMultiFileAuthState.
+
+Auto-reconnect when the server restarts.
+
+2. Multi-User Architecture
+
+Each user has:
+
+connection_id
+
+saved WhatsApp session folder
+
+webhook URL
+
+Support unlimited WhatsApp accounts connected at the same time.
+
+3. Backend API (Node.js + Express)
+
+Generate the following endpoints:
+
+✅ GET /api/get-qr/:connection_id
+
+Starts Baileys client
+
+Returns latest QR code in JSON
+
+✅ POST /api/send-message
+
+Request body:
+
+{
+  "connection_id": "user123",
+  "to": "92300XXXXXXX",
+  "message": "Your question here",
+  "client_message_id": "unique-client-id-001"
+}
+
+
+Response:
+
+{
+  "status": "sent",
+  "client_message_id": "unique-client-id-001"
+}
+
+✅ Incoming messages webhook
+
+When a new message arrives on WhatsApp, call the user’s saved webhook URL:
+
+Webhook payload:
+
+{
+  "from": "92300XXXXXXX",
+  "message": "true",
+  "provider_message_id": "wamid-xxxx",
+  "connection_id": "user123"
+}
+
+✅ 4. Chat Synchronization
+
+Load last 50 messages from each chat.
+
+Save all messages (inbound/outbound) to database.
+
+Each message should have:
+
+internal UUID
+
+client_message_id
+
+provider_message_id
+
+to/from
+
+message body
+
+status
+
+timestamp
+
+✅ 5. Database
+
+Use MongoDB or PostgreSQL.
+Create tables/collections for:
+
+- users
+- connections
+- messages
+- webhook logs
+✅ 6. Frontend (Admin Panel)
+
+Build a simple dashboard where a logged-in user can:
+
+Scan a QR code
+
+View connected WhatsApp status
+
+View chat list
+
+View message history
+
+Send a new message
+
+Set webhook URL
+
+Live incoming messages using WebSocket
+
+Use any of these:
+
+React + Tailwind
+
+Next.js
+
+Vue.js
+
+✅ 7. Requirements for Code Output
+
+When generating the solution:
+
+✅ Provide full project folder structure
+✅ Provide full code for each file
+✅ Provide installation steps
+✅ Provide .env example
+✅ Provide session storage explanation
+✅ Provide comments for every important function
+✅ Provide Baileys event handlers:
+
+connection.update
+
+messages.upsert
+
+creds.update
+
+✅ Add logic to map replies to client_message_id
+✅ Add retry logic if WhatsApp disconnects
+
+✅ 8. Extra Requirements
+
+Use WebSockets (Socket.IO) for real-time message updates.
+
+API should return clean JSON only.
+
+Handle errors gracefully.
+
+Write code in clean and modular structure:
+
+/services
+
+/controllers
+
+/routes
+
+/database
+
+/whatsapp
+
+/frontend
+
+Generate EVERYTHING needed to run this full system end-to-end.
