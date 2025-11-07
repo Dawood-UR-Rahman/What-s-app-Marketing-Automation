@@ -1,7 +1,7 @@
 import { ConnectionCard } from "@/components/ConnectionCard";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { QRCodeModal } from "@/components/QRCodeModal";
 import {
   Dialog,
@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Connection } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { socketService } from "@/lib/socket";
 
 export default function Connections() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -90,6 +91,37 @@ export default function Connections() {
       });
     },
   });
+
+  useEffect(() => {
+    const socket = socketService.connect();
+
+    const handleQRUpdate = (data: { connectionId: string; qr: string }) => {
+      if (data.connectionId === selectedConnection && qrModalOpen) {
+        setQrCode(data.qr);
+        setQrLoading(false);
+      }
+    };
+
+    const handleConnectionStatus = (data: { connectionId: string; status: string; phoneNumber?: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      
+      if (data.status === "connected" && data.connectionId === selectedConnection) {
+        setQrModalOpen(false);
+        toast({
+          title: "Connected",
+          description: `WhatsApp connected successfully${data.phoneNumber ? ` (${data.phoneNumber})` : ""}`,
+        });
+      }
+    };
+
+    socketService.on("qr-update", handleQRUpdate);
+    socketService.on("connection-status", handleConnectionStatus);
+
+    return () => {
+      socketService.off("qr-update", handleQRUpdate);
+      socketService.off("connection-status", handleConnectionStatus);
+    };
+  }, [selectedConnection, qrModalOpen, queryClient, toast]);
 
   const handleScanQR = async (connectionId: string) => {
     setSelectedConnection(connectionId);
