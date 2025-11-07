@@ -4,6 +4,7 @@ import makeWASocket, {
   WASocket,
   BaileysEventMap,
   proto,
+  fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import * as fs from "fs";
@@ -51,9 +52,18 @@ export class WhatsAppService {
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
+    const { version } = await fetchLatestBaileysVersion();
+    console.log(`Creating connection ${connectionId} with WA version ${version.join('.')}`);
+
     const socket = makeWASocket({
+      version,
       auth: state,
       printQRInTerminal: false,
+      browser: ['Ubuntu', 'Chrome', '20.0.04'],
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      markOnlineOnConnect: false,
     });
 
     const connection: WhatsAppConnection = {
