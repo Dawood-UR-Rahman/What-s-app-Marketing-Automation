@@ -2,21 +2,155 @@ import { DashboardMetrics } from "@/components/DashboardMetrics";
 import { ConnectionCard } from "@/components/ConnectionCard";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { QRCodeModal } from "@/components/QRCodeModal";
+import { connectionsApi } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { socketService } from "@/lib/socket";
+import type { Connection } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function Dashboard() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [newConnectionModalOpen, setNewConnectionModalOpen] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [newConnectionId, setNewConnectionId] = useState("");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const handleScanQR = (connectionId: string) => {
+  const { data: connections = [], isLoading } = useQuery<Connection[]>({
+    queryKey: ["/api/connections"],
+  });
+
+  useEffect(() => {
+    const socket = socketService.connect();
+
+    socket.on("connection-status", (data: { connectionId: string; status: string; phoneNumber?: string }) => {
+      console.log("Connection status update:", data);
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      
+      toast({
+        title: "Connection Status",
+        description: `${data.connectionId}: ${data.status}`,
+      });
+    });
+
+    socket.on("qr-update", (data: { connectionId: string; qr: string }) => {
+      console.log("QR update:", data);
+      if (data.connectionId === selectedConnection) {
+        setQrCode(data.qr);
+      }
+    });
+
+    return () => {
+      socket.off("connection-status");
+      socket.off("qr-update");
+    };
+  }, [queryClient, selectedConnection, toast]);
+
+  const createConnectionMutation = useMutation({
+    mutationFn: (connectionId: string) => connectionsApi.create(connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "Success",
+        description: "Connection created successfully",
+      });
+      setNewConnectionModalOpen(false);
+      setNewConnectionId("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to create connection",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteConnectionMutation = useMutation({
+    mutationFn: (connectionId: string) => connectionsApi.delete(connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "Success",
+        description: "Connection deleted successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to delete connection",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleScanQR = async (connectionId: string) => {
     setSelectedConnection(connectionId);
     setQrModalOpen(true);
+    setQrLoading(true);
+    setQrCode(null);
+
+    try {
+      const result = await connectionsApi.getQR(connectionId);
+      if (result.qr) {
+        setQrCode(result.qr);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to generate QR code",
+        variant: "destructive",
+      });
+    } finally {
+      setQrLoading(false);
+    }
   };
 
   const handleNewConnection = () => {
-    setSelectedConnection("new-connection-" + Date.now());
-    setQrModalOpen(true);
+    setNewConnectionModalOpen(true);
+  };
+
+  const handleCreateConnection = () => {
+    if (!newConnectionId.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a connection ID",
+        variant: "destructive",
+      });
+      return;
+    }
+    createConnectionMutation.mutate(newConnectionId);
+  };
+
+  const activeConnections = connections.filter(c => c.status === "connected").length;
+  const totalMessages = 0;
+  const webhookCalls = 0;
+
+  const formatRelativeTime = (date: Date | null) => {
+    if (!date) return "Never";
+    const now = new Date();
+    const diff = now.getTime() - new Date(date).getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} minute${minutes > 1 ? "s" : ""} ago`;
+    if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
+    return `${days} day${days > 1 ? "s" : ""} ago`;
   };
 
   return (
@@ -35,56 +169,86 @@ export default function Dashboard() {
       </div>
 
       <DashboardMetrics
-        totalConnections={3}
-        activeConnections={2}
-        totalMessages={1547}
-        webhookCalls={234}
+        totalConnections={connections.length}
+        activeConnections={activeConnections}
+        totalMessages={totalMessages}
+        webhookCalls={webhookCalls}
       />
 
       <div>
-        <h2 className="text-lg font-medium mb-4">Recent Connections</h2>
-        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-          <ConnectionCard
-            connectionId="user-123"
-            status="connected"
-            phoneNumber="+92 300 1234567"
-            webhookUrl="https://api.example.com/webhook"
-            lastActive="2 minutes ago"
-            onScanQR={() => handleScanQR("user-123")}
-            onSettings={() => console.log("Settings clicked")}
-            onDelete={() => console.log("Delete clicked")}
-          />
-          <ConnectionCard
-            connectionId="user-456"
-            status="connected"
-            phoneNumber="+92 301 9876543"
-            webhookUrl="https://api.example.com/webhook/456"
-            lastActive="5 minutes ago"
-            onScanQR={() => handleScanQR("user-456")}
-            onSettings={() => console.log("Settings clicked")}
-            onDelete={() => console.log("Delete clicked")}
-          />
-          <ConnectionCard
-            connectionId="user-789"
-            status="disconnected"
-            webhookUrl="https://api.example.com/webhook/789"
-            lastActive="1 hour ago"
-            onScanQR={() => handleScanQR("user-789")}
-            onSettings={() => console.log("Settings clicked")}
-            onDelete={() => console.log("Delete clicked")}
-          />
-        </div>
+        <h2 className="text-lg font-medium mb-4">Connections</h2>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading connections...</p>
+        ) : connections.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No connections yet. Create one to get started!</p>
+        ) : (
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            {connections.map((connection) => (
+              <ConnectionCard
+                key={connection.id}
+                connectionId={connection.connectionId}
+                status={connection.status as any}
+                phoneNumber={connection.phoneNumber || undefined}
+                webhookUrl={connection.webhookUrl || undefined}
+                lastActive={formatRelativeTime(connection.lastActive)}
+                onScanQR={() => handleScanQR(connection.connectionId)}
+                onSettings={() => console.log("Settings clicked")}
+                onDelete={() => deleteConnectionMutation.mutate(connection.connectionId)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {selectedConnection && (
         <QRCodeModal
           open={qrModalOpen}
           onOpenChange={setQrModalOpen}
-          qrCode="https://example.com/whatsapp-qr-demo"
+          qrCode={qrCode}
           connectionId={selectedConnection}
-          loading={false}
+          loading={qrLoading}
         />
       )}
+
+      <Dialog open={newConnectionModalOpen} onOpenChange={setNewConnectionModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Connection</DialogTitle>
+            <DialogDescription>
+              Enter a unique connection ID for your new WhatsApp connection
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="connection-id">Connection ID</Label>
+              <Input
+                id="connection-id"
+                placeholder="e.g., user-123"
+                value={newConnectionId}
+                onChange={(e) => setNewConnectionId(e.target.value)}
+                data-testid="input-new-connection-id"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleCreateConnection}
+                disabled={createConnectionMutation.isPending}
+                className="flex-1"
+                data-testid="button-create-connection"
+              >
+                Create Connection
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setNewConnectionModalOpen(false)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

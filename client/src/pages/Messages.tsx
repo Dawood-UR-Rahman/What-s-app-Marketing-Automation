@@ -1,6 +1,6 @@
 import { ChatList } from "@/components/ChatList";
 import { MessageThread } from "@/components/MessageThread";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Select,
   SelectContent,
@@ -8,83 +8,139 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { connectionsApi, chatsApi, messagesApi } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Connection, Chat, Message } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { socketService } from "@/lib/socket";
 
 export default function Messages() {
-  const [activeConnection, setActiveConnection] = useState("user-123");
-  const [activeChat, setActiveChat] = useState<string | null>("chat-1");
+  const [activeConnection, setActiveConnection] = useState<string | null>(null);
+  const [activeChat, setActiveChat] = useState<string | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const mockChats = [
-    {
-      id: "chat-1",
-      name: "John Doe",
-      phoneNumber: "+92 300 1234567",
-      lastMessage: "Hey, how are you?",
-      timestamp: "2m ago",
-      unreadCount: 3,
-    },
-    {
-      id: "chat-2",
-      name: "Alice Smith",
-      phoneNumber: "+92 301 9876543",
-      lastMessage: "Thanks for your help!",
-      timestamp: "1h ago",
-    },
-    {
-      id: "chat-3",
-      name: "Bob Johnson",
-      phoneNumber: "+92 302 5555555",
-      lastMessage: "See you tomorrow",
-      timestamp: "Yesterday",
-    },
-    {
-      id: "chat-4",
-      name: "Sarah Wilson",
-      phoneNumber: "+92 303 7777777",
-      lastMessage: "Perfect, thanks!",
-      timestamp: "2 days ago",
-    },
-  ];
+  const { data: connections = [] } = useQuery<Connection[]>({
+    queryKey: ["/api/connections"],
+  });
 
-  const mockMessages = [
-    {
-      id: "msg-1",
-      content: "Hey, how are you?",
-      timestamp: "10:30 AM",
-      isSent: false,
-    },
-    {
-      id: "msg-2",
-      content: "I'm doing great! Thanks for asking.",
-      timestamp: "10:31 AM",
-      isSent: true,
-      status: "delivered" as const,
-    },
-    {
-      id: "msg-3",
-      content: "That's wonderful to hear! Are we still on for tomorrow?",
-      timestamp: "10:32 AM",
-      isSent: false,
-    },
-    {
-      id: "msg-4",
-      content: "Yes, absolutely! Looking forward to it.",
-      timestamp: "10:33 AM",
-      isSent: true,
-      status: "read" as const,
-    },
-    {
-      id: "msg-5",
-      content: "Great! What time works best for you?",
-      timestamp: "10:34 AM",
-      isSent: false,
-    },
-  ];
+  const { data: chats = [] } = useQuery<Chat[]>({
+    queryKey: ["/api/chats", activeConnection],
+    enabled: !!activeConnection,
+  });
 
-  const activeChatData = mockChats.find((chat) => chat.id === activeChat);
+  const { data: messages = [] } = useQuery<Message[]>({
+    queryKey: ["/api/messages", activeConnection, activeChat],
+    enabled: !!activeConnection && !!activeChat,
+  });
+
+  useEffect(() => {
+    if (connections.length > 0 && !activeConnection) {
+      const connectedConnection = connections.find((c) => c.status === "connected");
+      if (connectedConnection) {
+        setActiveConnection(connectedConnection.connectionId);
+      } else if (connections[0]) {
+        setActiveConnection(connections[0].connectionId);
+      }
+    }
+  }, [connections, activeConnection]);
+
+  useEffect(() => {
+    const socket = socketService.connect();
+
+    socket.on("new-message", (data: { connectionId: string; chatId: string; message: any }) => {
+      console.log("New message:", data);
+      
+      if (data.connectionId === activeConnection) {
+        queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
+        
+        if (data.chatId === activeChat) {
+          queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
+        }
+      }
+    });
+
+    socket.on("message-sent", (data: { connectionId: string; chatId: string; clientMessageId?: string }) => {
+      console.log("Message sent:", data);
+      
+      if (data.connectionId === activeConnection) {
+        queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
+        
+        if (data.chatId === activeChat) {
+          queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
+        }
+      }
+    });
+
+    return () => {
+      socket.off("new-message");
+      socket.off("message-sent");
+    };
+  }, [activeConnection, activeChat, queryClient]);
+
+  const sendMessageMutation = useMutation({
+    mutationFn: ({ to, message }: { to: string; message: string }) =>
+      messagesApi.send(activeConnection!, to, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
+      queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to send message",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const activeChatData = chats.find((chat) => chat.chatId === activeChat);
+  const activeConnectionData = connections.find((c) => c.connectionId === activeConnection);
 
   const handleSendMessage = (message: string) => {
-    console.log("Sending message:", message);
+    if (!activeChat || !activeConnection) return;
+    
+    sendMessageMutation.mutate({ to: activeChat, message });
   };
+
+  const formatRelativeTime = (date: Date) => {
+    const now = new Date();
+    const diff = now.getTime() - new Date(date).getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days === 1) return "Yesterday";
+    return `${days}d ago`;
+  };
+
+  const formatMessageTime = (date: Date) => {
+    return new Date(date).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const formattedChats = chats.map((chat) => ({
+    id: chat.chatId,
+    name: chat.name,
+    phoneNumber: chat.phoneNumber,
+    lastMessage: chat.lastMessage,
+    timestamp: formatRelativeTime(chat.timestamp),
+    unreadCount: chat.unreadCount,
+  }));
+
+  const formattedMessages = messages.map((msg) => ({
+    id: msg.id,
+    content: msg.content,
+    timestamp: formatMessageTime(msg.timestamp),
+    isSent: msg.isSent,
+    status: msg.status as any,
+  }));
 
   return (
     <div className="flex flex-col h-full">
@@ -96,43 +152,55 @@ export default function Messages() {
           </p>
         </div>
         <div className="w-64">
-          <Select value={activeConnection} onValueChange={setActiveConnection}>
+          <Select value={activeConnection || ""} onValueChange={setActiveConnection}>
             <SelectTrigger data-testid="select-connection">
-              <SelectValue />
+              <SelectValue placeholder="Select connection" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="user-123">user-123 (+92 300 1234567)</SelectItem>
-              <SelectItem value="user-456">user-456 (+92 301 9876543)</SelectItem>
-              <SelectItem value="user-789">user-789 (Disconnected)</SelectItem>
+              {connections.map((conn) => (
+                <SelectItem key={conn.id} value={conn.connectionId}>
+                  {conn.connectionId} {conn.phoneNumber ? `(${conn.phoneNumber})` : ""}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-80">
-          <ChatList
-            chats={mockChats}
-            activeChat={activeChat || undefined}
-            onChatSelect={setActiveChat}
-          />
+      {!activeConnection ? (
+        <div className="flex items-center justify-center flex-1">
+          <p className="text-muted-foreground">
+            {connections.length === 0
+              ? "No connections available. Create a connection first."
+              : "Select a connection to view messages"}
+          </p>
         </div>
-        <div className="flex-1">
-          {activeChatData ? (
-            <MessageThread
-              chatName={activeChatData.name}
-              phoneNumber={activeChatData.phoneNumber}
-              messages={mockMessages}
-              onSendMessage={handleSendMessage}
-              connectionStatus="connected"
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <div className="w-80">
+            <ChatList
+              chats={formattedChats}
+              activeChat={activeChat || undefined}
+              onChatSelect={setActiveChat}
             />
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-muted-foreground">Select a chat to start messaging</p>
-            </div>
-          )}
+          </div>
+          <div className="flex-1">
+            {activeChatData ? (
+              <MessageThread
+                chatName={activeChatData.name}
+                phoneNumber={activeChatData.phoneNumber}
+                messages={formattedMessages}
+                onSendMessage={handleSendMessage}
+                connectionStatus={activeConnectionData?.status as any}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-muted-foreground">Select a chat to start messaging</p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

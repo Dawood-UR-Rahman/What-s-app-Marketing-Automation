@@ -11,44 +11,106 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { WebhookSettings } from "@/components/WebhookSettings";
+import { connectionsApi } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import type { Connection } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function Connections() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [newConnectionModalOpen, setNewConnectionModalOpen] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [newConnectionId, setNewConnectionId] = useState("");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const connections = [
-    {
-      id: "user-123",
-      status: "connected" as const,
-      phoneNumber: "+92 300 1234567",
-      webhookUrl: "https://api.example.com/webhook",
-      lastActive: "2 minutes ago",
-    },
-    {
-      id: "user-456",
-      status: "connected" as const,
-      phoneNumber: "+92 301 9876543",
-      webhookUrl: "https://api.example.com/webhook/456",
-      lastActive: "5 minutes ago",
-    },
-    {
-      id: "user-789",
-      status: "disconnected" as const,
-      webhookUrl: "https://api.example.com/webhook/789",
-      lastActive: "1 hour ago",
-    },
-    {
-      id: "user-abc",
-      status: "connecting" as const,
-      webhookUrl: "https://api.example.com/webhook/abc",
-      lastActive: "Just now",
-    },
-  ];
+  const { data: connections = [], isLoading } = useQuery<Connection[]>({
+    queryKey: ["/api/connections"],
+  });
 
-  const handleScanQR = (connectionId: string) => {
+  const createConnectionMutation = useMutation({
+    mutationFn: (connectionId: string) => connectionsApi.create(connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "Success",
+        description: "Connection created successfully",
+      });
+      setNewConnectionModalOpen(false);
+      setNewConnectionId("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to create connection",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteConnectionMutation = useMutation({
+    mutationFn: (connectionId: string) => connectionsApi.delete(connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "Success",
+        description: "Connection deleted successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to delete connection",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateWebhookMutation = useMutation({
+    mutationFn: ({ connectionId, webhookUrl }: { connectionId: string; webhookUrl: string }) =>
+      connectionsApi.updateWebhook(connectionId, webhookUrl),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "Success",
+        description: "Webhook URL updated successfully",
+      });
+      setSettingsModalOpen(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to update webhook URL",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleScanQR = async (connectionId: string) => {
     setSelectedConnection(connectionId);
     setQrModalOpen(true);
+    setQrLoading(true);
+    setQrCode(null);
+
+    try {
+      const result = await connectionsApi.getQR(connectionId);
+      if (result.qr) {
+        setQrCode(result.qr);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to generate QR code",
+        variant: "destructive",
+      });
+    } finally {
+      setQrLoading(false);
+    }
   };
 
   const handleSettings = (connectionId: string) => {
@@ -57,16 +119,42 @@ export default function Connections() {
   };
 
   const handleNewConnection = () => {
-    setSelectedConnection("new-connection-" + Date.now());
-    setQrModalOpen(true);
+    setNewConnectionModalOpen(true);
+  };
+
+  const handleCreateConnection = () => {
+    if (!newConnectionId.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a connection ID",
+        variant: "destructive",
+      });
+      return;
+    }
+    createConnectionMutation.mutate(newConnectionId);
   };
 
   const handleSaveWebhook = (url: string) => {
-    console.log("Saving webhook URL:", url);
-    setSettingsModalOpen(false);
+    if (selectedConnection) {
+      updateWebhookMutation.mutate({ connectionId: selectedConnection, webhookUrl: url });
+    }
   };
 
-  const selectedConnectionData = connections.find((c) => c.id === selectedConnection);
+  const selectedConnectionData = connections.find((c) => c.connectionId === selectedConnection);
+
+  const formatRelativeTime = (date: Date | null) => {
+    if (!date) return "Never";
+    const now = new Date();
+    const diff = now.getTime() - new Date(date).getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} minute${minutes > 1 ? "s" : ""} ago`;
+    if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
+    return `${days} day${days > 1 ? "s" : ""} ago`;
+  };
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -83,30 +171,36 @@ export default function Connections() {
         </Button>
       </div>
 
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-        {connections.map((connection) => (
-          <ConnectionCard
-            key={connection.id}
-            connectionId={connection.id}
-            status={connection.status}
-            phoneNumber={connection.phoneNumber}
-            webhookUrl={connection.webhookUrl}
-            lastActive={connection.lastActive}
-            onScanQR={() => handleScanQR(connection.id)}
-            onSettings={() => handleSettings(connection.id)}
-            onDelete={() => console.log("Delete clicked")}
-          />
-        ))}
-      </div>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading connections...</p>
+      ) : connections.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No connections yet. Create one to get started!</p>
+      ) : (
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+          {connections.map((connection) => (
+            <ConnectionCard
+              key={connection.id}
+              connectionId={connection.connectionId}
+              status={connection.status as any}
+              phoneNumber={connection.phoneNumber || undefined}
+              webhookUrl={connection.webhookUrl || undefined}
+              lastActive={formatRelativeTime(connection.lastActive)}
+              onScanQR={() => handleScanQR(connection.connectionId)}
+              onSettings={() => handleSettings(connection.connectionId)}
+              onDelete={() => deleteConnectionMutation.mutate(connection.connectionId)}
+            />
+          ))}
+        </div>
+      )}
 
       {selectedConnection && (
         <>
           <QRCodeModal
             open={qrModalOpen}
             onOpenChange={setQrModalOpen}
-            qrCode="https://example.com/whatsapp-qr-demo"
+            qrCode={qrCode}
             connectionId={selectedConnection}
-            loading={false}
+            loading={qrLoading}
           />
 
           <Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
@@ -119,7 +213,7 @@ export default function Connections() {
               </DialogHeader>
               <WebhookSettings
                 connectionId={selectedConnection}
-                currentWebhookUrl={selectedConnectionData?.webhookUrl}
+                currentWebhookUrl={selectedConnectionData?.webhookUrl || ""}
                 onSave={handleSaveWebhook}
                 isActive={selectedConnectionData?.status === "connected"}
               />
@@ -127,6 +221,46 @@ export default function Connections() {
           </Dialog>
         </>
       )}
+
+      <Dialog open={newConnectionModalOpen} onOpenChange={setNewConnectionModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Connection</DialogTitle>
+            <DialogDescription>
+              Enter a unique connection ID for your new WhatsApp connection
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="connection-id">Connection ID</Label>
+              <Input
+                id="connection-id"
+                placeholder="e.g., user-123"
+                value={newConnectionId}
+                onChange={(e) => setNewConnectionId(e.target.value)}
+                data-testid="input-new-connection-id"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleCreateConnection}
+                disabled={createConnectionMutation.isPending}
+                className="flex-1"
+                data-testid="button-create-connection"
+              >
+                Create Connection
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setNewConnectionModalOpen(false)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

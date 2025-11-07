@@ -1,38 +1,172 @@
-import { type User, type InsertUser } from "@shared/schema";
+import { 
+  type User, 
+  type InsertUser,
+  type Connection,
+  type InsertConnection,
+  type Message,
+  type InsertMessage,
+  type WebhookLog,
+  type InsertWebhookLog,
+  connections,
+  messages,
+  webhookLogs,
+  users
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, and } from "drizzle-orm";
 import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  
+  createConnection(connection: InsertConnection): Promise<Connection>;
+  getConnection(connectionId: string): Promise<Connection | undefined>;
+  getConnectionById(id: string): Promise<Connection | undefined>;
+  getAllConnections(): Promise<Connection[]>;
+  updateConnection(connectionId: string, data: Partial<Connection>): Promise<Connection | undefined>;
+  deleteConnection(connectionId: string): Promise<boolean>;
+  
+  createMessage(message: InsertMessage): Promise<Message>;
+  getMessage(id: string): Promise<Message | undefined>;
+  getMessagesByConnectionAndChat(connectionId: string, chatId: string, limit?: number): Promise<Message[]>;
+  getChatsForConnection(connectionId: string): Promise<Array<{chatId: string; lastMessage: Message}>>;
+  updateMessageStatus(id: string, status: string): Promise<Message | undefined>;
+  
+  createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
+  getWebhookLogs(connectionId: string, limit?: number): Promise<WebhookLog[]>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
-  }
-
+export class DbStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return result[0];
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const result = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    return result[0];
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+    const result = await db.insert(users).values(insertUser).returning();
+    return result[0];
+  }
+
+  async createConnection(connection: InsertConnection): Promise<Connection> {
+    const result = await db.insert(connections).values(connection).returning();
+    return result[0];
+  }
+
+  async getConnection(connectionId: string): Promise<Connection | undefined> {
+    const result = await db
+      .select()
+      .from(connections)
+      .where(eq(connections.connectionId, connectionId))
+      .limit(1);
+    return result[0];
+  }
+
+  async getConnectionById(id: string): Promise<Connection | undefined> {
+    const result = await db
+      .select()
+      .from(connections)
+      .where(eq(connections.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  async getAllConnections(): Promise<Connection[]> {
+    return await db.select().from(connections);
+  }
+
+  async updateConnection(connectionId: string, data: Partial<Connection>): Promise<Connection | undefined> {
+    const result = await db
+      .update(connections)
+      .set(data)
+      .where(eq(connections.connectionId, connectionId))
+      .returning();
+    return result[0];
+  }
+
+  async deleteConnection(connectionId: string): Promise<boolean> {
+    const result = await db
+      .delete(connections)
+      .where(eq(connections.connectionId, connectionId))
+      .returning();
+    return result.length > 0;
+  }
+
+  async createMessage(message: InsertMessage): Promise<Message> {
+    const result = await db.insert(messages).values(message).returning();
+    return result[0];
+  }
+
+  async getMessage(id: string): Promise<Message | undefined> {
+    const result = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  async getMessagesByConnectionAndChat(
+    connectionId: string,
+    chatId: string,
+    limit: number = 50
+  ): Promise<Message[]> {
+    return await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.connectionId, connectionId), eq(messages.chatId, chatId)))
+      .orderBy(desc(messages.timestamp))
+      .limit(limit);
+  }
+
+  async getChatsForConnection(connectionId: string): Promise<Array<{chatId: string; lastMessage: Message}>> {
+    const allMessages = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.connectionId, connectionId))
+      .orderBy(desc(messages.timestamp));
+
+    const chatMap = new Map<string, Message>();
+    for (const msg of allMessages) {
+      if (!chatMap.has(msg.chatId)) {
+        chatMap.set(msg.chatId, msg);
+      }
+    }
+
+    return Array.from(chatMap.entries()).map(([chatId, lastMessage]) => ({
+      chatId,
+      lastMessage,
+    }));
+  }
+
+  async updateMessageStatus(id: string, status: string): Promise<Message | undefined> {
+    const result = await db
+      .update(messages)
+      .set({ status })
+      .where(eq(messages.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog> {
+    const result = await db.insert(webhookLogs).values(log).returning();
+    return result[0];
+  }
+
+  async getWebhookLogs(connectionId: string, limit: number = 100): Promise<WebhookLog[]> {
+    return await db
+      .select()
+      .from(webhookLogs)
+      .where(eq(webhookLogs.connectionId, connectionId))
+      .orderBy(desc(webhookLogs.timestamp))
+      .limit(limit);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DbStorage();
