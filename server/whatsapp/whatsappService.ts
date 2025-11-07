@@ -285,12 +285,19 @@ export class WhatsAppService {
     const allConnections = await storage.getAllConnections();
 
     for (const conn of allConnections) {
-      if (conn.status === "connected" || conn.status === "connecting") {
-        try {
-          await this.createConnection(conn.connectionId);
-          console.log(`Restored connection: ${conn.connectionId}`);
-        } catch (error) {
-          console.error(`Failed to restore connection ${conn.connectionId}:`, error);
+      if (conn.status === "connected") {
+        const sessionPath = path.join(this.sessionsPath, conn.connectionId);
+        if (fs.existsSync(sessionPath)) {
+          try {
+            await this.createConnection(conn.connectionId);
+            console.log(`Restored connection: ${conn.connectionId}`);
+          } catch (error) {
+            console.error(`Failed to restore connection ${conn.connectionId}:`, error);
+            await storage.updateConnection(conn.connectionId, { status: "disconnected" });
+          }
+        } else {
+          console.log(`Session files not found for ${conn.connectionId}, marking as disconnected`);
+          await storage.updateConnection(conn.connectionId, { status: "disconnected" });
         }
       }
     }
