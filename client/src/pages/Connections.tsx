@@ -18,6 +18,7 @@ import type { Connection } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { socketService } from "@/lib/socket";
+import { useLocation } from "wouter";
 
 export default function Connections() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -27,8 +28,10 @@ export default function Connections() {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [newConnectionId, setNewConnectionId] = useState("");
+  const [connectionPhase, setConnectionPhase] = useState<"generating_qr" | "waiting_scan" | "pairing" | "syncing" | "ready">("generating_qr");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
 
   const { data: connections = [], isLoading } = useQuery<Connection[]>({
     queryKey: ["/api/connections"],
@@ -102,37 +105,52 @@ export default function Connections() {
       }
     };
 
+    const handleConnectionPhase = (data: { connectionId: string; phase: "generating_qr" | "waiting_scan" | "pairing" | "syncing" | "ready" }) => {
+      if (data.connectionId === selectedConnection && qrModalOpen) {
+        setConnectionPhase(data.phase);
+      }
+    };
+
     const handleConnectionStatus = (data: { connectionId: string; status: string; phoneNumber?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
       
       if (data.status === "connected" && data.connectionId === selectedConnection) {
-        setQrModalOpen(false);
         toast({
           title: "Connected",
           description: `WhatsApp connected successfully${data.phoneNumber ? ` (${data.phoneNumber})` : ""}`,
         });
+        
+        // Auto-redirect to messages page after a brief delay
+        setTimeout(() => {
+          setQrModalOpen(false);
+          setLocation(`/messages?connectionId=${selectedConnection}`);
+        }, 1500);
       }
     };
 
     socketService.on("qr-update", handleQRUpdate);
+    socketService.on("connection-phase", handleConnectionPhase);
     socketService.on("connection-status", handleConnectionStatus);
 
     return () => {
       socketService.off("qr-update", handleQRUpdate);
+      socketService.off("connection-phase", handleConnectionPhase);
       socketService.off("connection-status", handleConnectionStatus);
     };
-  }, [selectedConnection, qrModalOpen, queryClient, toast]);
+  }, [selectedConnection, qrModalOpen, queryClient, toast, setLocation]);
 
   const handleScanQR = async (connectionId: string) => {
     setSelectedConnection(connectionId);
     setQrModalOpen(true);
     setQrLoading(true);
     setQrCode(null);
+    setConnectionPhase("generating_qr");
 
     try {
       const result = await connectionsApi.getQR(connectionId);
       if (result.qr) {
         setQrCode(result.qr);
+        setConnectionPhase("waiting_scan");
       }
     } catch (error) {
       toast({
@@ -233,6 +251,7 @@ export default function Connections() {
             qrCode={qrCode}
             connectionId={selectedConnection}
             loading={qrLoading}
+            phase={connectionPhase}
           />
 
           <Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
