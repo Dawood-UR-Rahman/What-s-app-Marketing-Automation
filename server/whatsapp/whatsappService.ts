@@ -5,6 +5,7 @@ import makeWASocket, {
   BaileysEventMap,
   proto,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import * as fs from "fs";
@@ -252,27 +253,79 @@ export class WhatsAppService {
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
 
+      const connection = this.connections.get(connectionId);
+      if (!connection) continue;
+
       const from = msg.key.remoteJid || "";
       let messageBody = "";
       let mediaType: string | null = null;
+      let mediaUrl: string | null = null;
+      let mediaMetadata: any = null;
 
-      // Extract message content
+      // Extract message content and media
       if (msg.message.conversation) {
         messageBody = msg.message.conversation;
       } else if (msg.message.extendedTextMessage?.text) {
         messageBody = msg.message.extendedTextMessage.text;
       } else if (msg.message.imageMessage) {
-        messageBody = `[IMAGE]${msg.message.imageMessage.caption || ""}`;
+        const caption = msg.message.imageMessage.caption || "";
+        messageBody = caption || "[IMAGE]";
         mediaType = "image";
+        mediaMetadata = {
+          mimetype: msg.message.imageMessage.mimetype,
+          fileLength: msg.message.imageMessage.fileLength,
+          caption,
+        };
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {});
+          mediaUrl = `data:${msg.message.imageMessage.mimetype};base64,${buffer.toString('base64')}`;
+        } catch (err) {
+          console.error("Failed to download image:", err);
+        }
       } else if (msg.message.videoMessage) {
-        messageBody = `[VIDEO]${msg.message.videoMessage.caption || ""}`;
+        const caption = msg.message.videoMessage.caption || "";
+        messageBody = caption || "[VIDEO]";
         mediaType = "video";
+        mediaMetadata = {
+          mimetype: msg.message.videoMessage.mimetype,
+          fileLength: msg.message.videoMessage.fileLength,
+          caption,
+        };
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {});
+          mediaUrl = `data:${msg.message.videoMessage.mimetype};base64,${buffer.toString('base64')}`;
+        } catch (err) {
+          console.error("Failed to download video:", err);
+        }
       } else if (msg.message.audioMessage) {
         messageBody = "[AUDIO]";
         mediaType = "audio";
+        mediaMetadata = {
+          mimetype: msg.message.audioMessage.mimetype,
+          fileLength: msg.message.audioMessage.fileLength,
+          ptt: msg.message.audioMessage.ptt,
+        };
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {});
+          mediaUrl = `data:${msg.message.audioMessage.mimetype};base64,${buffer.toString('base64')}`;
+        } catch (err) {
+          console.error("Failed to download audio:", err);
+        }
       } else if (msg.message.documentMessage) {
-        messageBody = `[DOCUMENT: ${msg.message.documentMessage.fileName || "file"}]`;
+        const fileName = msg.message.documentMessage.fileName || "file";
+        messageBody = `[DOCUMENT: ${fileName}]`;
         mediaType = "document";
+        mediaMetadata = {
+          mimetype: msg.message.documentMessage.mimetype,
+          fileLength: msg.message.documentMessage.fileLength,
+          fileName,
+        };
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {});
+          mediaUrl = `data:${msg.message.documentMessage.mimetype};base64,${buffer.toString('base64')}`;
+        } catch (err) {
+          console.error("Failed to download document:", err);
+        }
       } else if (msg.message.stickerMessage) {
         messageBody = "[STICKER]";
         mediaType = "sticker";
@@ -293,29 +346,45 @@ export class WhatsAppService {
         status: "received",
         isSent: false,
         clientMessageId: null,
+        mediaType,
+        mediaUrl,
+        mediaMetadata: mediaMetadata ? JSON.stringify(mediaMetadata) : null,
       });
 
-      // Emit real-time message to connected clients
+      // Emit real-time message with media to connected clients
       if (this.io) {
         this.io.emit("new-message", {
           connectionId,
           chatId,
           message: savedMessage,
+          mediaType,
+          mediaUrl,
+          mediaMetadata,
         });
       }
 
-      // Call webhook if configured
+      // Call webhook asynchronously (non-blocking)
       const webhookCallback = this.webhookCallbacks.get(connectionId);
       if (webhookCallback) {
-        await webhookCallback({
+        // Don't await - let it run in background
+        this.deliverWebhook(webhookCallback, {
           from,
           message: messageBody,
           media_type: mediaType,
+          media_url: mediaUrl,
+          media_metadata: mediaMetadata,
           provider_message_id: providerMessageId,
           connection_id: connectionId,
+        }).catch(err => {
+          console.error("Background webhook delivery failed:", err);
         });
       }
     }
+  }
+
+  private async deliverWebhook(callback: (data: any) => Promise<void>, data: any) {
+    // Non-blocking webhook delivery - runs in background
+    await callback(data);
   }
 
   private async syncMessages(connectionId: string) {
@@ -336,7 +405,9 @@ export class WhatsAppService {
     message: string,
     clientMessageId?: string,
     mediaUrl?: string,
-    mediaType?: "image" | "video" | "audio" | "document"
+    mediaType?: "image" | "video" | "audio" | "document",
+    fileName?: string,
+    mimetype?: string
   ): Promise<{ success: boolean; providerMessageId?: string; error?: string }> {
     const connection = this.connections.get(connectionId);
 
@@ -351,15 +422,48 @@ export class WhatsAppService {
       let messageBodyForStorage = message;
 
       if (mediaUrl && mediaType) {
-        // Send media message
+        // Download or decode media
         const mediaBuffer = mediaUrl.startsWith("http") 
           ? await this.downloadMedia(mediaUrl) 
-          : Buffer.from(mediaUrl, 'base64');
+          : mediaUrl.startsWith("data:") 
+            ? this.decodeDataUrl(mediaUrl)
+            : Buffer.from(mediaUrl, 'base64');
 
-        messageContent = {
-          [mediaType]: mediaBuffer,
-          caption: message || undefined,
-        };
+        // Detect mimetype from data URL if not provided
+        const detectedMimetype = mimetype || (mediaUrl.startsWith("data:") 
+          ? mediaUrl.split(';')[0].split(':')[1] 
+          : this.guessMimetype(mediaType));
+
+        // Build Baileys-compliant message content
+        if (mediaType === "image") {
+          messageContent = {
+            image: mediaBuffer,
+            caption: message || undefined,
+          };
+        } else if (mediaType === "video") {
+          messageContent = {
+            video: mediaBuffer,
+            caption: message || undefined,
+            mimetype: detectedMimetype,
+          };
+        } else if (mediaType === "audio") {
+          messageContent = {
+            audio: mediaBuffer,
+            mimetype: detectedMimetype || "audio/ogg; codecs=opus",
+            ptt: false, // Set to true for voice messages
+          };
+        } else if (mediaType === "document") {
+          if (!fileName) {
+            return { success: false, error: "fileName is required for document messages" };
+          }
+          messageContent = {
+            document: mediaBuffer,
+            mimetype: detectedMimetype || "application/octet-stream",
+            fileName: fileName,
+            caption: message || undefined,
+          };
+        }
+        
         messageBodyForStorage = `[${mediaType.toUpperCase()}]${message ? `: ${message}` : ""}`;
       } else {
         // Send text message
@@ -379,14 +483,16 @@ export class WhatsAppService {
         providerMessageId,
         status: "sent",
         isSent: true,
+        mediaType: mediaType || null,
+        mediaUrl: mediaUrl || null,
+        mediaMetadata: mediaType && (fileName || mimetype) ? JSON.stringify({ fileName, mimetype }) : null,
       });
 
       if (this.io) {
         this.io.emit("message-sent", {
           connectionId,
           chatId: jid,
-          clientMessageId,
-          providerMessageId,
+          message: savedMessage,
         });
         
         // Also emit the full message for real-time updates
@@ -408,6 +514,21 @@ export class WhatsAppService {
     const axios = (await import('axios')).default;
     const response = await axios.get(url, { responseType: 'arraybuffer' });
     return Buffer.from(response.data);
+  }
+
+  private decodeDataUrl(dataUrl: string): Buffer {
+    const base64Data = dataUrl.split(',')[1];
+    return Buffer.from(base64Data, 'base64');
+  }
+
+  private guessMimetype(mediaType: string): string {
+    const mimetypes: Record<string, string> = {
+      image: "image/jpeg",
+      video: "video/mp4",
+      audio: "audio/ogg; codecs=opus",
+      document: "application/pdf",
+    };
+    return mimetypes[mediaType] || "application/octet-stream";
   }
 
   getConnection(connectionId: string): WhatsAppConnection | undefined {

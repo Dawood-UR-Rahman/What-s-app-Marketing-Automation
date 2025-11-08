@@ -49,6 +49,9 @@ export const messages = pgTable("messages", {
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("sent"),
   isSent: boolean("is_sent").notNull().default(false),
+  mediaType: text("media_type"),
+  mediaUrl: text("media_url"),
+  mediaMetadata: text("media_metadata"),
   timestamp: timestamp("timestamp").defaultNow().notNull(),
 });
 

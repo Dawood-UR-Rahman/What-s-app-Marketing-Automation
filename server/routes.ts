@@ -13,6 +13,8 @@ const sendMessageSchema = z.object({
   client_message_id: z.string().optional(),
   media_url: z.string().optional(),
   media_type: z.enum(["image", "video", "audio", "document"]).optional(),
+  file_name: z.string().optional(),
+  mimetype: z.string().optional(),
 });
 
 const createConnectionSchema = z.object({
@@ -122,7 +124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = sendMessageSchema.parse(req.body);
 
-      const { connection_id, to, message, client_message_id, media_url, media_type } = validatedData;
+      const { connection_id, to, message, client_message_id, media_url, media_type, file_name, mimetype } = validatedData;
 
       const connection = await storage.getConnection(connection_id);
       if (!connection) {
@@ -139,7 +141,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message,
         client_message_id,
         media_url,
-        media_type
+        media_type,
+        file_name,
+        mimetype
       );
 
       if (result.success) {
@@ -245,32 +249,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const webhookCallback = async (data: any) => {
-        try {
-          const response = await axios.post(validatedData.webhook_url, data, {
-            headers: { "Content-Type": "application/json" },
-            timeout: 10000,
-          });
+        const maxRetries = 3;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            const response = await axios.post(validatedData.webhook_url, data, {
+              headers: { 
+                "Content-Type": "application/json",
+                "X-Webhook-Attempt": attempt.toString(),
+                "X-Connection-ID": connection_id,
+              },
+              timeout: 10000,
+            });
 
-          await storage.createWebhookLog({
-            connectionId: connection_id,
-            messageId: null,
-            webhookUrl: validatedData.webhook_url,
-            payload: JSON.stringify(data),
-            statusCode: response.status,
-            response: JSON.stringify(response.data),
-            error: null,
-          });
-        } catch (error) {
-          console.error("Webhook call failed:", error);
-          await storage.createWebhookLog({
-            connectionId: connection_id,
-            messageId: null,
-            webhookUrl: validatedData.webhook_url,
-            payload: JSON.stringify(data),
-            statusCode: null,
-            response: null,
-            error: (error as Error).message,
-          });
+            // Success - log this attempt
+            await storage.createWebhookLog({
+              connectionId: connection_id,
+              messageId: null,
+              webhookUrl: validatedData.webhook_url,
+              payload: JSON.stringify(data),
+              statusCode: response.status,
+              response: JSON.stringify(response.data),
+              error: attempt > 1 ? `Success on attempt ${attempt}` : null,
+            });
+            
+            // Send success notification via WebSocket
+            if (io) {
+              io.emit("webhook-delivered", {
+                connectionId: connection_id,
+                success: true,
+                attempt,
+              });
+            }
+            
+            return; // Success, exit function
+          } catch (error) {
+            const errorMessage = (error as Error).message;
+            const statusCode = (error as any)?.response?.status || null;
+            const responseData = (error as any)?.response?.data;
+            
+            console.error(`Webhook attempt ${attempt}/${maxRetries} failed:`, errorMessage);
+            
+            // Log each failed attempt individually
+            await storage.createWebhookLog({
+              connectionId: connection_id,
+              messageId: null,
+              webhookUrl: validatedData.webhook_url,
+              payload: JSON.stringify(data),
+              statusCode,
+              response: responseData ? JSON.stringify(responseData) : null,
+              error: `Attempt ${attempt}/${maxRetries}: ${errorMessage}`,
+            });
+            
+            // If this is not the last attempt, wait before retrying (exponential backoff)
+            if (attempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+            } else {
+              // All retries failed - send failure notification
+              if (io) {
+                io.emit("webhook-failed", {
+                  connectionId: connection_id,
+                  success: false,
+                  attempts: maxRetries,
+                  error: errorMessage,
+                });
+              }
+            }
+          }
         }
       };
 
@@ -365,6 +410,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: msg.status,
         clientMessageId: msg.clientMessageId,
         providerMessageId: msg.providerMessageId,
+        mediaType: msg.mediaType,
+        mediaUrl: msg.mediaUrl,
+        mediaMetadata: msg.mediaMetadata ? JSON.parse(msg.mediaMetadata) : null,
       }));
 
       res.json(formattedMessages);
