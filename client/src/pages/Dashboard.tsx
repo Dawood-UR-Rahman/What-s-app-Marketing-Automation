@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
+  const [connectionPhase, setConnectionPhase] = useState<"generating_qr" | "waiting_scan" | "pairing" | "syncing" | "ready">("generating_qr");
   const [newConnectionId, setNewConnectionId] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -36,28 +37,53 @@ export default function Dashboard() {
   useEffect(() => {
     const socket = socketService.connect();
 
-    socket.on("connection-status", (data: { connectionId: string; status: string; phoneNumber?: string }) => {
+    const handleQRUpdate = (data: { connectionId: string; qr: string }) => {
+      console.log("QR update:", data);
+      if (data.connectionId === selectedConnection && qrModalOpen) {
+        setQrCode(data.qr);
+        setConnectionPhase("waiting_scan");
+        setQrLoading(false);
+      }
+    };
+
+    const handleConnectionPhase = (data: { connectionId: string; phase: "generating_qr" | "waiting_scan" | "pairing" | "syncing" | "ready" }) => {
+      if (data.connectionId === selectedConnection && qrModalOpen) {
+        setConnectionPhase(data.phase);
+      }
+    };
+
+    const handleConnectionStatus = (data: { connectionId: string; status: string; phoneNumber?: string }) => {
       console.log("Connection status update:", data);
       queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
       
-      toast({
-        title: "Connection Status",
-        description: `${data.connectionId}: ${data.status}`,
-      });
-    });
-
-    socket.on("qr-update", (data: { connectionId: string; qr: string }) => {
-      console.log("QR update:", data);
-      if (data.connectionId === selectedConnection) {
-        setQrCode(data.qr);
+      if (data.status === "connected" && data.connectionId === selectedConnection) {
+        toast({
+          title: "Connected",
+          description: `WhatsApp connected successfully${data.phoneNumber ? ` (${data.phoneNumber})` : ""}`,
+        });
+        
+        // Auto-close modal after brief delay
+        setTimeout(() => {
+          setQrModalOpen(false);
+        }, 2000);
+      } else {
+        toast({
+          title: "Connection Status",
+          description: `${data.connectionId}: ${data.status}`,
+        });
       }
-    });
+    };
+
+    socketService.on("qr-update", handleQRUpdate);
+    socketService.on("connection-phase", handleConnectionPhase);
+    socketService.on("connection-status", handleConnectionStatus);
 
     return () => {
-      socket.off("connection-status");
-      socket.off("qr-update");
+      socketService.off("qr-update", handleQRUpdate);
+      socketService.off("connection-phase", handleConnectionPhase);
+      socketService.off("connection-status", handleConnectionStatus);
     };
-  }, [queryClient, selectedConnection, toast]);
+  }, [selectedConnection, qrModalOpen, queryClient, toast]);
 
   const createConnectionMutation = useMutation({
     mutationFn: (connectionId: string) => connectionsApi.create(connectionId),
@@ -99,24 +125,31 @@ export default function Dashboard() {
 
   const handleScanQR = async (connectionId: string) => {
     setSelectedConnection(connectionId);
-    setQrModalOpen(true);
-    setQrLoading(true);
     setQrCode(null);
+    setConnectionPhase("generating_qr");
+    setQrLoading(true);
+    
+    // Open modal immediately to show progress
+    setQrModalOpen(true);
 
-    try {
-      const result = await connectionsApi.getQR(connectionId);
-      if (result.qr) {
-        setQrCode(result.qr);
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to generate QR code",
-        variant: "destructive",
+    // Start QR generation in background - WebSocket will update the QR code
+    connectionsApi.getQR(connectionId)
+      .then((result) => {
+        if (result.qr) {
+          setQrCode(result.qr);
+          setConnectionPhase("waiting_scan");
+        }
+        setQrLoading(false);
+      })
+      .catch((error) => {
+        toast({
+          title: "Error",
+          description: "Failed to generate QR code",
+          variant: "destructive",
+        });
+        setQrLoading(false);
+        setQrModalOpen(false);
       });
-    } finally {
-      setQrLoading(false);
-    }
   };
 
   const handleNewConnection = () => {
@@ -207,6 +240,7 @@ export default function Dashboard() {
           qrCode={qrCode}
           connectionId={selectedConnection}
           loading={qrLoading}
+          phase={connectionPhase}
         />
       )}
 
