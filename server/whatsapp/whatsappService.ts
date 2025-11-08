@@ -366,10 +366,14 @@ export class WhatsAppService {
       // Call webhook asynchronously (non-blocking)
       const webhookCallback = this.webhookCallbacks.get(connectionId);
       if (webhookCallback) {
+        const clientNumber = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
+        
         // Don't await - let it run in background
         this.deliverWebhook(webhookCallback, {
-          from,
+          from: clientNumber,
           message: messageBody,
+          client_message_id: savedMessage.clientMessageId,
+          client_number: clientNumber,
           media_type: mediaType,
           media_url: mediaUrl,
           media_metadata: mediaMetadata,

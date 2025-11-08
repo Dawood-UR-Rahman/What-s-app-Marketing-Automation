@@ -8,6 +8,31 @@ interface MessageBubbleProps {
   timestamp: string;
   isSent: boolean;
   status?: MessageStatus;
+  mediaType?: string | null;
+  mediaUrl?: string | null;
+}
+
+function renderContentWithLinks(content: string) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = content.split(urlRegex);
+  
+  return parts.map((part, index) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:opacity-80"
+          data-testid="link-product-url"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <span key={index}>{part}</span>;
+  });
 }
 
 export function MessageBubble({
@@ -16,6 +41,8 @@ export function MessageBubble({
   timestamp,
   isSent,
   status = "sent",
+  mediaType,
+  mediaUrl,
 }: MessageBubbleProps) {
   const statusIcon = {
     sent: <Check className="h-3 w-3" />,
@@ -36,9 +63,19 @@ export function MessageBubble({
             : "bg-muted text-foreground rounded-bl-sm"
         }`}
       >
-        <p className="text-sm break-words" data-testid={`text-message-content-${messageId}`}>
-          {content}
-        </p>
+        {mediaType === "image" && mediaUrl && (
+          <img 
+            src={mediaUrl} 
+            alt="Message image" 
+            className="rounded-lg max-w-full mb-2"
+            loading="lazy"
+          />
+        )}
+        {content && (
+          <p className="text-sm break-words whitespace-pre-wrap" data-testid={`text-message-content-${messageId}`}>
+            {renderContentWithLinks(content)}
+          </p>
+        )}
         <div className={`flex items-center gap-1 mt-1 ${isSent ? "justify-end" : "justify-start"}`}>
           <span className="text-xs opacity-70" data-testid={`text-timestamp-${messageId}`}>
             {timestamp}

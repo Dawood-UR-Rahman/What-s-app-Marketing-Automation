@@ -4,8 +4,64 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { connectionsApi, type Connection } from "@/lib/api";
+import { useState } from "react";
 
 export default function Settings() {
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: connections = [] } = useQuery<Connection[]>({
+    queryKey: ["/api/connections"],
+  });
+
+  const updateWebhookMutation = useMutation({
+    mutationFn: ({ connectionId, webhookUrl }: { connectionId: string; webhookUrl: string }) =>
+      connectionsApi.updateWebhook(connectionId, webhookUrl),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "Success",
+        description: "Webhook URL updated successfully",
+      });
+      setWebhookUrl("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to update webhook URL",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleUpdateWebhook = () => {
+    if (!selectedConnectionId) {
+      toast({
+        title: "Error",
+        description: "Please select a connection",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!webhookUrl) {
+      toast({
+        title: "Error",
+        description: "Please enter a webhook URL",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateWebhookMutation.mutate({ connectionId: selectedConnectionId, webhookUrl });
+  };
+
+  const selectedConnection = connections.find(c => c.connectionId === selectedConnectionId);
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div>
@@ -162,6 +218,63 @@ export default function Settings() {
             </div>
             <Button className="w-full" data-testid="button-save-sync">
               Save Sync Settings
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Webhook Configuration</CardTitle>
+            <CardDescription>
+              Configure webhook URLs for incoming message notifications
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="connection-select">Select Connection</Label>
+              <Select value={selectedConnectionId} onValueChange={setSelectedConnectionId}>
+                <SelectTrigger id="connection-select">
+                  <SelectValue placeholder="Choose a connection" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections.map((conn) => (
+                    <SelectItem key={conn.id} value={conn.connectionId}>
+                      {conn.connectionId} {conn.phoneNumber && `(${conn.phoneNumber})`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedConnection && (
+              <div className="space-y-2">
+                <Label>Current Webhook URL</Label>
+                <p className="text-sm text-muted-foreground">
+                  {selectedConnection.webhookUrl || "Not configured"}
+                </p>
+              </div>
+            )}
+            <Separator />
+            <div className="space-y-2">
+              <Label htmlFor="webhook-url">New Webhook URL</Label>
+              <Input
+                id="webhook-url"
+                type="url"
+                placeholder="https://your-api.com/webhook"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                data-testid="input-webhook-url"
+              />
+              <p className="text-xs text-muted-foreground">
+                This URL will receive POST requests when messages arrive
+              </p>
+            </div>
+            <Button 
+              className="w-full" 
+              onClick={handleUpdateWebhook}
+              disabled={updateWebhookMutation.isPending}
+              data-testid="button-save-webhook"
+            >
+              Update Webhook URL
             </Button>
           </CardContent>
         </Card>

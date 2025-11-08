@@ -29,6 +29,9 @@ export interface Message {
   status: string;
   clientMessageId: string | null;
   providerMessageId: string | null;
+  mediaType?: string | null;
+  mediaUrl?: string | null;
+  mediaMetadata?: any;
 }
 
 export interface Chat {
@@ -81,13 +84,19 @@ export const messagesApi = {
     connectionId: string,
     to: string,
     message: string,
-    clientMessageId?: string
+    clientMessageId?: string,
+    mediaUrl?: string,
+    mediaType?: "image" | "video" | "audio" | "document",
+    productUrl?: string
   ): Promise<{ status: string; client_message_id: string | null; provider_message_id?: string }> {
     const response = await api.post("/api/send-message", {
       connection_id: connectionId,
       to,
       message,
       client_message_id: clientMessageId,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      product_url: productUrl,
     });
     return response.data;
   },

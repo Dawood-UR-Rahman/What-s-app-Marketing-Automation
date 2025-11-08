@@ -79,8 +79,8 @@ export default function Messages() {
   }, [activeConnection, activeChat, queryClient]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: ({ to, message }: { to: string; message: string }) =>
-      messagesApi.send(activeConnection!, to, message),
+    mutationFn: ({ to, message, imageUrl, productUrl }: { to: string; message: string; imageUrl?: string; productUrl?: string }) =>
+      messagesApi.send(activeConnection!, to, message, undefined, imageUrl, imageUrl ? "image" : undefined, productUrl),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
       queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
@@ -97,10 +97,10 @@ export default function Messages() {
   const activeChatData = chats.find((chat) => chat.chatId === activeChat);
   const activeConnectionData = connections.find((c) => c.connectionId === activeConnection);
 
-  const handleSendMessage = (message: string) => {
+  const handleSendMessage = (message: string, imageUrl?: string, productUrl?: string) => {
     if (!activeChat || !activeConnection) return;
     
-    sendMessageMutation.mutate({ to: activeChat, message });
+    sendMessageMutation.mutate({ to: activeChat, message, imageUrl, productUrl });
   };
 
   const formatRelativeTime = (date: Date) => {
@@ -140,6 +140,8 @@ export default function Messages() {
     timestamp: formatMessageTime(msg.timestamp),
     isSent: msg.isSent,
     status: msg.status as any,
+    mediaType: msg.mediaType,
+    mediaUrl: msg.mediaUrl,
   }));
 
   return (

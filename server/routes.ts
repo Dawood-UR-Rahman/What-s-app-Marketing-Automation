@@ -15,6 +15,7 @@ const sendMessageSchema = z.object({
   media_type: z.enum(["image", "video", "audio", "document"]).optional(),
   file_name: z.string().optional(),
   mimetype: z.string().optional(),
+  product_url: z.string().url().optional(),
 });
 
 const createConnectionSchema = z.object({
@@ -25,6 +26,70 @@ const createConnectionSchema = z.object({
 const updateWebhookSchema = z.object({
   webhook_url: z.string().url(),
 });
+
+function createWebhookCallback(webhookUrl: string, connectionId: string, io: SocketIOServer) {
+  return async (data: any) => {
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await axios.post(webhookUrl, data, {
+          headers: { 
+            "Content-Type": "application/json",
+            "X-Webhook-Attempt": attempt.toString(),
+            "X-Connection-ID": connectionId,
+          },
+          timeout: 10000,
+        });
+
+        await storage.createWebhookLog({
+          connectionId: connectionId,
+          messageId: null,
+          webhookUrl: webhookUrl,
+          payload: JSON.stringify(data),
+          statusCode: response.status,
+          response: JSON.stringify(response.data),
+          error: attempt > 1 ? `Success on attempt ${attempt}` : null,
+        });
+        
+        io.emit("webhook-delivered", {
+          connectionId: connectionId,
+          success: true,
+          attempt,
+        });
+        
+        return;
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+        const statusCode = (error as any)?.response?.status || null;
+        const responseData = (error as any)?.response?.data;
+        
+        console.error(`Webhook attempt ${attempt}/${maxRetries} failed:`, errorMessage);
+        
+        await storage.createWebhookLog({
+          connectionId: connectionId,
+          messageId: null,
+          webhookUrl: webhookUrl,
+          payload: JSON.stringify(data),
+          statusCode,
+          response: responseData ? JSON.stringify(responseData) : null,
+          error: `Attempt ${attempt}/${maxRetries}: ${errorMessage}`,
+        });
+        
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+        } else {
+          io.emit("webhook-failed", {
+            connectionId: connectionId,
+            success: false,
+            attempts: maxRetries,
+            error: errorMessage,
+          });
+        }
+      }
+    }
+  };
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -124,7 +189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = sendMessageSchema.parse(req.body);
 
-      const { connection_id, to, message, client_message_id, media_url, media_type, file_name, mimetype } = validatedData;
+      const { connection_id, to, message, client_message_id, media_url, media_type, file_name, mimetype, product_url } = validatedData;
 
       const connection = await storage.getConnection(connection_id);
       if (!connection) {
@@ -135,10 +200,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Connection not active" });
       }
 
+      let finalMessage = message;
+      if (product_url) {
+        finalMessage = message ? `${message}\n\n${product_url}` : product_url;
+      }
+
       const result = await whatsappService.sendMessage(
         connection_id,
         to,
-        message,
+        finalMessage,
         client_message_id,
         media_url,
         media_type,
@@ -188,6 +258,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         qrCode: null,
         lastActive: new Date(),
       });
+
+      if (validatedData.webhook_url) {
+        const webhookCallback = createWebhookCallback(validatedData.webhook_url, validatedData.connection_id, io);
+        whatsappService.registerWebhookCallback(validatedData.connection_id, webhookCallback);
+      }
 
       res.json(connection);
     } catch (error) {
@@ -248,77 +323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         webhookUrl: validatedData.webhook_url,
       });
 
-      const webhookCallback = async (data: any) => {
-        const maxRetries = 3;
-        
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          try {
-            const response = await axios.post(validatedData.webhook_url, data, {
-              headers: { 
-                "Content-Type": "application/json",
-                "X-Webhook-Attempt": attempt.toString(),
-                "X-Connection-ID": connection_id,
-              },
-              timeout: 10000,
-            });
-
-            // Success - log this attempt
-            await storage.createWebhookLog({
-              connectionId: connection_id,
-              messageId: null,
-              webhookUrl: validatedData.webhook_url,
-              payload: JSON.stringify(data),
-              statusCode: response.status,
-              response: JSON.stringify(response.data),
-              error: attempt > 1 ? `Success on attempt ${attempt}` : null,
-            });
-            
-            // Send success notification via WebSocket
-            if (io) {
-              io.emit("webhook-delivered", {
-                connectionId: connection_id,
-                success: true,
-                attempt,
-              });
-            }
-            
-            return; // Success, exit function
-          } catch (error) {
-            const errorMessage = (error as Error).message;
-            const statusCode = (error as any)?.response?.status || null;
-            const responseData = (error as any)?.response?.data;
-            
-            console.error(`Webhook attempt ${attempt}/${maxRetries} failed:`, errorMessage);
-            
-            // Log each failed attempt individually
-            await storage.createWebhookLog({
-              connectionId: connection_id,
-              messageId: null,
-              webhookUrl: validatedData.webhook_url,
-              payload: JSON.stringify(data),
-              statusCode,
-              response: responseData ? JSON.stringify(responseData) : null,
-              error: `Attempt ${attempt}/${maxRetries}: ${errorMessage}`,
-            });
-            
-            // If this is not the last attempt, wait before retrying (exponential backoff)
-            if (attempt < maxRetries) {
-              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
-            } else {
-              // All retries failed - send failure notification
-              if (io) {
-                io.emit("webhook-failed", {
-                  connectionId: connection_id,
-                  success: false,
-                  attempts: maxRetries,
-                  error: errorMessage,
-                });
-              }
-            }
-          }
-        }
-      };
-
+      const webhookCallback = createWebhookCallback(validatedData.webhook_url, connection_id, io);
       whatsappService.registerWebhookCallback(connection_id, webhookCallback);
 
       res.json(updatedConnection);
@@ -446,7 +451,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/stats", async (req, res) => {
+    try {
+      const stats = await storage.getDashboardStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching dashboard stats:", error);
+      res.status(500).json({
+        error: "Failed to fetch stats",
+        message: (error as Error).message,
+      });
+    }
+  });
+
   await whatsappService.restoreAllConnections();
+
+  const allConnections = await storage.getAllConnections();
+  for (const conn of allConnections) {
+    if (conn.webhookUrl) {
+      const webhookCallback = createWebhookCallback(conn.webhookUrl, conn.connectionId, io);
+      whatsappService.registerWebhookCallback(conn.connectionId, webhookCallback);
+      console.log(`Registered webhook for connection: ${conn.connectionId}`);
+    }
+  }
 
   return httpServer;
 }

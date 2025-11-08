@@ -34,6 +34,17 @@ export default function Dashboard() {
     queryKey: ["/api/connections"],
   });
 
+  const { data: stats } = useQuery<{
+    totalConnections: number;
+    activeConnections: number;
+    totalMessagesSent: number;
+    totalMessagesReceived: number;
+    totalWebhookCalls: number;
+  }>({
+    queryKey: ["/api/stats"],
+    refetchInterval: 5000,
+  });
+
   useEffect(() => {
     const socket = socketService.connect();
 
@@ -168,10 +179,6 @@ export default function Dashboard() {
     createConnectionMutation.mutate(newConnectionId);
   };
 
-  const activeConnections = connections.filter(c => c.status === "connected").length;
-  const totalMessages = 0;
-  const webhookCalls = 0;
-
   const formatRelativeTime = (date: Date | null) => {
     if (!date) return "Never";
     const now = new Date();
@@ -202,10 +209,10 @@ export default function Dashboard() {
       </div>
 
       <DashboardMetrics
-        totalConnections={connections.length}
-        activeConnections={activeConnections}
-        totalMessages={totalMessages}
-        webhookCalls={webhookCalls}
+        totalConnections={stats?.totalConnections || 0}
+        activeConnections={stats?.activeConnections || 0}
+        totalMessages={(stats?.totalMessagesSent || 0) + (stats?.totalMessagesReceived || 0)}
+        webhookCalls={stats?.totalWebhookCalls || 0}
       />
 
       <div>

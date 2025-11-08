@@ -36,6 +36,14 @@ export interface IStorage {
   
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
   getWebhookLogs(connectionId: string, limit?: number): Promise<WebhookLog[]>;
+  
+  getDashboardStats(): Promise<{
+    totalConnections: number;
+    activeConnections: number;
+    totalMessagesSent: number;
+    totalMessagesReceived: number;
+    totalWebhookCalls: number;
+  }>;
 }
 
 export class DbStorage implements IStorage {
@@ -166,6 +174,33 @@ export class DbStorage implements IStorage {
       .where(eq(webhookLogs.connectionId, connectionId))
       .orderBy(desc(webhookLogs.timestamp))
       .limit(limit);
+  }
+
+  async getDashboardStats(): Promise<{
+    totalConnections: number;
+    activeConnections: number;
+    totalMessagesSent: number;
+    totalMessagesReceived: number;
+    totalWebhookCalls: number;
+  }> {
+    const allConnections = await db.select().from(connections);
+    const totalConnections = allConnections.length;
+    const activeConnections = allConnections.filter(c => c.status === "connected").length;
+
+    const allMessages = await db.select().from(messages);
+    const totalMessagesSent = allMessages.filter(m => m.isSent).length;
+    const totalMessagesReceived = allMessages.filter(m => !m.isSent).length;
+
+    const allWebhookLogs = await db.select().from(webhookLogs);
+    const totalWebhookCalls = allWebhookLogs.length;
+
+    return {
+      totalConnections,
+      activeConnections,
+      totalMessagesSent,
+      totalMessagesReceived,
+      totalWebhookCalls,
+    };
   }
 }
 

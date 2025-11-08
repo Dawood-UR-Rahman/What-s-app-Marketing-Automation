@@ -10,13 +10,15 @@ interface Message {
   timestamp: string;
   isSent: boolean;
   status?: "sent" | "delivered" | "read" | "failed";
+  mediaType?: string | null;
+  mediaUrl?: string | null;
 }
 
 interface MessageThreadProps {
   chatName: string;
   phoneNumber: string;
   messages: Message[];
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, imageUrl?: string, productUrl?: string) => void;
   connectionStatus?: "connected" | "disconnected" | "connecting";
 }
 
@@ -60,6 +62,8 @@ export function MessageThread({
               timestamp={message.timestamp}
               isSent={message.isSent}
               status={message.status}
+              mediaType={message.mediaType}
+              mediaUrl={message.mediaUrl}
             />
           ))}
         </div>
