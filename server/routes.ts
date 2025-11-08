@@ -11,6 +11,8 @@ const sendMessageSchema = z.object({
   to: z.string(),
   message: z.string(),
   client_message_id: z.string().optional(),
+  media_url: z.string().optional(),
+  media_type: z.enum(["image", "video", "audio", "document"]).optional(),
 });
 
 const createConnectionSchema = z.object({
@@ -120,7 +122,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = sendMessageSchema.parse(req.body);
 
-      const { connection_id, to, message, client_message_id } = validatedData;
+      const { connection_id, to, message, client_message_id, media_url, media_type } = validatedData;
 
       const connection = await storage.getConnection(connection_id);
       if (!connection) {
@@ -135,7 +137,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         connection_id,
         to,
         message,
-        client_message_id
+        client_message_id,
+        media_url,
+        media_type
       );
 
       if (result.success) {

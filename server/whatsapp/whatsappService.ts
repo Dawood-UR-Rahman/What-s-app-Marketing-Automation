@@ -253,9 +253,33 @@ export class WhatsAppService {
       if (!msg.message || msg.key.fromMe) continue;
 
       const from = msg.key.remoteJid || "";
-      const messageBody = msg.message.conversation || 
-                         msg.message.extendedTextMessage?.text || 
-                         "[Media]";
+      let messageBody = "";
+      let mediaType: string | null = null;
+
+      // Extract message content
+      if (msg.message.conversation) {
+        messageBody = msg.message.conversation;
+      } else if (msg.message.extendedTextMessage?.text) {
+        messageBody = msg.message.extendedTextMessage.text;
+      } else if (msg.message.imageMessage) {
+        messageBody = `[IMAGE]${msg.message.imageMessage.caption || ""}`;
+        mediaType = "image";
+      } else if (msg.message.videoMessage) {
+        messageBody = `[VIDEO]${msg.message.videoMessage.caption || ""}`;
+        mediaType = "video";
+      } else if (msg.message.audioMessage) {
+        messageBody = "[AUDIO]";
+        mediaType = "audio";
+      } else if (msg.message.documentMessage) {
+        messageBody = `[DOCUMENT: ${msg.message.documentMessage.fileName || "file"}]`;
+        mediaType = "document";
+      } else if (msg.message.stickerMessage) {
+        messageBody = "[STICKER]";
+        mediaType = "sticker";
+      } else {
+        messageBody = "[Media or unsupported message type]";
+      }
+
       const providerMessageId = msg.key.id || "";
       const chatId = from;
 
@@ -271,6 +295,7 @@ export class WhatsAppService {
         clientMessageId: null,
       });
 
+      // Emit real-time message to connected clients
       if (this.io) {
         this.io.emit("new-message", {
           connectionId,
@@ -279,11 +304,13 @@ export class WhatsAppService {
         });
       }
 
+      // Call webhook if configured
       const webhookCallback = this.webhookCallbacks.get(connectionId);
       if (webhookCallback) {
         await webhookCallback({
           from,
           message: messageBody,
+          media_type: mediaType,
           provider_message_id: providerMessageId,
           connection_id: connectionId,
         });
@@ -307,7 +334,9 @@ export class WhatsAppService {
     connectionId: string,
     to: string,
     message: string,
-    clientMessageId?: string
+    clientMessageId?: string,
+    mediaUrl?: string,
+    mediaType?: "image" | "video" | "audio" | "document"
   ): Promise<{ success: boolean; providerMessageId?: string; error?: string }> {
     const connection = this.connections.get(connectionId);
 
@@ -318,18 +347,34 @@ export class WhatsAppService {
     try {
       const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
       
-      const sentMsg = await connection.socket.sendMessage(jid, {
-        text: message,
-      });
+      let messageContent: any;
+      let messageBodyForStorage = message;
 
+      if (mediaUrl && mediaType) {
+        // Send media message
+        const mediaBuffer = mediaUrl.startsWith("http") 
+          ? await this.downloadMedia(mediaUrl) 
+          : Buffer.from(mediaUrl, 'base64');
+
+        messageContent = {
+          [mediaType]: mediaBuffer,
+          caption: message || undefined,
+        };
+        messageBodyForStorage = `[${mediaType.toUpperCase()}]${message ? `: ${message}` : ""}`;
+      } else {
+        // Send text message
+        messageContent = { text: message };
+      }
+      
+      const sentMsg = await connection.socket.sendMessage(jid, messageContent);
       const providerMessageId = sentMsg?.key.id || "";
 
-      await storage.createMessage({
+      const savedMessage = await storage.createMessage({
         connectionId,
         chatId: jid,
         from: connectionId,
         to: jid,
-        messageBody: message,
+        messageBody: messageBodyForStorage,
         clientMessageId: clientMessageId || null,
         providerMessageId,
         status: "sent",
@@ -343,6 +388,13 @@ export class WhatsAppService {
           clientMessageId,
           providerMessageId,
         });
+        
+        // Also emit the full message for real-time updates
+        this.io.emit("new-message", {
+          connectionId,
+          chatId: jid,
+          message: savedMessage,
+        });
       }
 
       return { success: true, providerMessageId };
@@ -350,6 +402,12 @@ export class WhatsAppService {
       console.error(`Error sending message for ${connectionId}:`, error);
       return { success: false, error: (error as Error).message };
     }
+  }
+
+  private async downloadMedia(url: string): Promise<Buffer> {
+    const axios = (await import('axios')).default;
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    return Buffer.from(response.data);
   }
 
   getConnection(connectionId: string): WhatsAppConnection | undefined {
