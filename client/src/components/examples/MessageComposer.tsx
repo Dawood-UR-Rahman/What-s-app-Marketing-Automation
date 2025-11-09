@@ -1,8 +1,9 @@
 import { MessageComposer } from "../MessageComposer";
+import type { SendPayload } from "@shared/schema";
 
 export default function MessageComposerExample() {
-  const handleSend = (message: string) => {
-    console.log("Sending message:", message);
+  const handleSend = (payload: SendPayload) => {
+    console.log("Sending message:", payload);
   };
 
   return (

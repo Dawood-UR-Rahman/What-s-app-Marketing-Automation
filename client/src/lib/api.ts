@@ -15,6 +15,7 @@ export interface Connection {
   userId: string | null;
   phoneNumber: string | null;
   webhookUrl: string | null;
+  apiToken: string | null;
   status: string;
   qrCode: string | null;
   lastActive: Date | null;

@@ -30,8 +30,8 @@ export default function MessageThreadExample() {
     },
   ];
 
-  const handleSendMessage = (message: string) => {
-    console.log("Sending message:", message);
+  const handleSendMessage = (payload: import("@shared/schema").SendPayload) => {
+    console.log("Sending message:", payload);
   };
 
   return (
