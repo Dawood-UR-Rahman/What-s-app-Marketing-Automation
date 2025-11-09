@@ -77,6 +77,20 @@ export const connectionsApi = {
     const response = await api.get(`/api/get-qr/${connectionId}`);
     return response.data;
   },
+
+  async generateApiToken(connectionId: string): Promise<{ api_token: string; connection_id: string }> {
+    const response = await api.patch(`/api/connections/${connectionId}/api-token`, {
+      generate_new: true,
+    });
+    return response.data;
+  },
+
+  async clearApiToken(connectionId: string): Promise<{ connection_id: string }> {
+    const response = await api.patch(`/api/connections/${connectionId}/api-token`, {
+      api_token: null,
+    });
+    return response.data;
+  },
 };
 
 export const messagesApi = {

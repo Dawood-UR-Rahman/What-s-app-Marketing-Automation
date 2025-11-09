@@ -9,10 +9,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { connectionsApi, type Connection } from "@/lib/api";
 import { useState } from "react";
+import { Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
 
 export default function Settings() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [apiTokenConnectionId, setApiTokenConnectionId] = useState<string>("");
+  const [showApiToken, setShowApiToken] = useState(false);
+  const [generatedToken, setGeneratedToken] = useState<string>("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -60,7 +64,82 @@ export default function Settings() {
     updateWebhookMutation.mutate({ connectionId: selectedConnectionId, webhookUrl });
   };
 
+  const generateApiTokenMutation = useMutation({
+    mutationFn: (connectionId: string) => connectionsApi.generateApiToken(connectionId),
+    onSuccess: (data) => {
+      setGeneratedToken(data.api_token);
+      setShowApiToken(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "API Token Generated",
+        description: "Copy and save your token securely. It won't be shown again!",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to generate API token",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const clearApiTokenMutation = useMutation({
+    mutationFn: (connectionId: string) => connectionsApi.clearApiToken(connectionId),
+    onSuccess: () => {
+      setGeneratedToken("");
+      setShowApiToken(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/connections"] });
+      toast({
+        title: "API Token Cleared",
+        description: "The API token has been removed from this connection",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.error || "Failed to clear API token",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleGenerateToken = () => {
+    if (!apiTokenConnectionId) {
+      toast({
+        title: "Error",
+        description: "Please select a connection",
+        variant: "destructive",
+      });
+      return;
+    }
+    generateApiTokenMutation.mutate(apiTokenConnectionId);
+  };
+
+  const handleClearToken = () => {
+    if (!apiTokenConnectionId) {
+      toast({
+        title: "Error",
+        description: "Please select a connection",
+        variant: "destructive",
+      });
+      return;
+    }
+    clearApiTokenMutation.mutate(apiTokenConnectionId);
+  };
+
+  const handleCopyToken = () => {
+    if (generatedToken) {
+      navigator.clipboard.writeText(generatedToken);
+      toast({
+        title: "Copied",
+        description: "API token copied to clipboard",
+      });
+    }
+  };
+
   const selectedConnection = connections.find(c => c.connectionId === selectedConnectionId);
+  const apiTokenConnection = connections.find(c => c.connectionId === apiTokenConnectionId);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -74,33 +153,89 @@ export default function Settings() {
       <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>API Configuration</CardTitle>
+            <CardTitle>API Token Management</CardTitle>
             <CardDescription>
-              Configure your API settings and endpoints
+              Generate API tokens for programmatic access to send messages
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="api-endpoint">API Endpoint</Label>
-              <Input
-                id="api-endpoint"
-                placeholder="https://api.example.com"
-                defaultValue="http://localhost:5000"
-                data-testid="input-api-endpoint"
-              />
+              <Label htmlFor="api-token-connection">Select Connection</Label>
+              <Select value={apiTokenConnectionId} onValueChange={setApiTokenConnectionId}>
+                <SelectTrigger id="api-token-connection" data-testid="select-api-token-connection">
+                  <SelectValue placeholder="Choose a connection" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections.map((conn) => (
+                    <SelectItem key={conn.id} value={conn.connectionId}>
+                      {conn.connectionId} {conn.phoneNumber && `(${conn.phoneNumber})`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="api-key">API Key</Label>
-              <Input
-                id="api-key"
-                type="password"
-                placeholder="Enter your API key"
-                data-testid="input-api-key"
-              />
+
+            {apiTokenConnection && (
+              <div className="space-y-2">
+                <Label>Current Status</Label>
+                <Badge variant={apiTokenConnection.apiToken ? "default" : "secondary"}>
+                  {apiTokenConnection.apiToken ? "Token Active" : "No Token"}
+                </Badge>
+              </div>
+            )}
+
+            {generatedToken && (
+              <div className="space-y-2 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                <div className="flex items-center gap-2">
+                  <Label className="text-yellow-600 dark:text-yellow-400 font-semibold">⚠️ Save This Token</Label>
+                </div>
+                <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                  This token will only be shown once. Copy it now and store it securely!
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    value={generatedToken}
+                    readOnly
+                    className="font-mono text-sm"
+                    data-testid="input-generated-token"
+                  />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    onClick={handleCopyToken}
+                    data-testid="button-copy-token"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <Separator />
+            <div className="flex gap-2">
+              <Button 
+                className="flex-1" 
+                onClick={handleGenerateToken}
+                disabled={!apiTokenConnectionId || generateApiTokenMutation.isPending}
+                data-testid="button-generate-token"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                {apiTokenConnection?.apiToken ? "Regenerate Token" : "Generate Token"}
+              </Button>
+              {apiTokenConnection?.apiToken && (
+                <Button 
+                  variant="destructive"
+                  onClick={handleClearToken}
+                  disabled={clearApiTokenMutation.isPending}
+                  data-testid="button-clear-token"
+                >
+                  Clear Token
+                </Button>
+              )}
             </div>
-            <Button className="w-full" data-testid="button-save-api">
-              Save API Settings
-            </Button>
+            <p className="text-xs text-muted-foreground">
+              Use API tokens to authenticate requests to /api/send-text, /api/send-image, /api/send-link, and /api/send-buttons endpoints
+            </p>
           </CardContent>
         </Card>
 
