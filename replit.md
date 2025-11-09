@@ -15,7 +15,10 @@ Preferred communication style: Simple, everyday language.
 ### Poll Message System Enhancements
 - **Poll Display**: Polls now show in clean, bordered boxes with numbered options and clear question headers
 - **Poll Responses**: When users respond to polls, their selected option is displayed with a check icon in a visually distinct format
+- **Poll Vote Decryption**: Poll responses are properly handled in `messages.update` event using `getAggregateVotesInPollMessage` from Baileys
+- **Poll Context**: Poll responses now include the original poll question and all options in both storage and webhook payloads
 - **Design Consistency**: Both polls and responses follow shadcn design patterns with primary color accents
+- **Technical Implementation**: Poll votes are encrypted and require decryption via Baileys API - handled automatically in the message update handler
 
 ### Unread Message Tracking
 - **Server-Side Calculation**: Implemented three new storage methods to calculate unread counts:
