@@ -35,6 +35,9 @@ export interface IStorage {
   getChatsForConnection(connectionId: string): Promise<Array<{chatId: string; lastMessage: Message}>>;
   updateMessageStatus(id: string, status: string): Promise<Message | undefined>;
   markMessageAsRead(id: string): Promise<Message | undefined>;
+  markChatMessagesAsRead(connectionId: string, chatId: string): Promise<void>;
+  getUnreadCountForChat(connectionId: string, chatId: string): Promise<number>;
+  getTotalUnreadCount(connectionId: string): Promise<number>;
   
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
   getWebhookLogs(connectionId: string, limit?: number): Promise<WebhookLog[]>;
@@ -180,6 +183,49 @@ export class DbStorage implements IStorage {
       .where(eq(messages.id, id))
       .returning();
     return result[0];
+  }
+
+  async markChatMessagesAsRead(connectionId: string, chatId: string): Promise<void> {
+    await db
+      .update(messages)
+      .set({ isRead: true })
+      .where(
+        and(
+          eq(messages.connectionId, connectionId),
+          eq(messages.chatId, chatId),
+          eq(messages.isSent, false),
+          eq(messages.isRead, false)
+        )
+      );
+  }
+
+  async getUnreadCountForChat(connectionId: string, chatId: string): Promise<number> {
+    const unreadMessages = await db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.connectionId, connectionId),
+          eq(messages.chatId, chatId),
+          eq(messages.isSent, false),
+          eq(messages.isRead, false)
+        )
+      );
+    return unreadMessages.length;
+  }
+
+  async getTotalUnreadCount(connectionId: string): Promise<number> {
+    const unreadMessages = await db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.connectionId, connectionId),
+          eq(messages.isSent, false),
+          eq(messages.isRead, false)
+        )
+      );
+    return unreadMessages.length;
   }
 
   async createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog> {

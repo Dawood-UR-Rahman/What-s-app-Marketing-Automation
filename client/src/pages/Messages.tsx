@@ -13,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Connection, Chat, Message } from "@/lib/api";
 import type { SendPayload } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
-import { socketService } from "@/lib/socket";
+import { useSocket } from "@/contexts/SocketContext";
 import { usePageTitleNotification } from "@/hooks/use-page-title-notification";
 import { useNotificationSound } from "@/hooks/use-notification-sound";
 
@@ -23,6 +23,7 @@ export default function Messages() {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { socket } = useSocket();
 
   // Initialize notification hooks early (before useEffects that use them)
   const { playNotificationSound } = useNotificationSound(true);
@@ -42,6 +43,16 @@ export default function Messages() {
   });
 
   useEffect(() => {
+    if (activeConnection && activeChat) {
+      fetch(`/api/messages/${activeConnection}/${activeChat}/mark-read`, {
+        method: "PATCH",
+      }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
+      });
+    }
+  }, [activeConnection, activeChat, queryClient]);
+
+  useEffect(() => {
     if (connections.length > 0 && !activeConnection) {
       const connectedConnection = connections.find((c) => c.status === "connected");
       if (connectedConnection) {
@@ -53,9 +64,9 @@ export default function Messages() {
   }, [connections, activeConnection]);
 
   useEffect(() => {
-    const socket = socketService.connect();
+    if (!socket) return;
 
-    socket.on("new-message", (data: { connectionId: string; chatId: string; message: any }) => {
+    const handleNewMessage = (data: { connectionId: string; chatId: string; message: any }) => {
       console.log("New message:", data);
       
       if (data.connectionId === activeConnection) {
@@ -63,14 +74,21 @@ export default function Messages() {
         
         if (data.chatId === activeChat) {
           queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
+          
+          // Mark messages as read when new message arrives in active chat
+          fetch(`/api/messages/${activeConnection}/${activeChat}/mark-read`, {
+            method: "PATCH",
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
+          });
         }
         
         // Play notification sound for new messages
         playNotificationSound();
       }
-    });
+    };
 
-    socket.on("message-sent", (data: { connectionId: string; chatId: string; clientMessageId?: string }) => {
+    const handleMessageSent = (data: { connectionId: string; chatId: string; clientMessageId?: string }) => {
       console.log("Message sent:", data);
       
       if (data.connectionId === activeConnection) {
@@ -80,13 +98,16 @@ export default function Messages() {
           queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
         }
       }
-    });
+    };
+
+    socket.on("new-message", handleNewMessage);
+    socket.on("message-sent", handleMessageSent);
 
     return () => {
-      socket.off("new-message");
-      socket.off("message-sent");
+      socket.off("new-message", handleNewMessage);
+      socket.off("message-sent", handleMessageSent);
     };
-  }, [activeConnection, activeChat, queryClient, playNotificationSound]);
+  }, [socket, activeConnection, activeChat, queryClient, playNotificationSound]);
 
   const sendMessageMutation = useMutation({
     mutationFn: ({ to, payload }: { to: string; payload: SendPayload }) =>

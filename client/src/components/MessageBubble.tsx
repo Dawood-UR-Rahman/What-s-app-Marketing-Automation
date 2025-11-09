@@ -81,35 +81,54 @@ export function MessageBubble({
           />
         )}
         {isPoll ? (
-          <div className="flex flex-col gap-2" data-testid={`poll-${messageId}`}>
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 opacity-70" />
-              <span className="text-sm font-medium">{pollQuestion}</span>
+          <div className="flex flex-col gap-3" data-testid={`poll-${messageId}`}>
+            <div className="flex items-center gap-2 pb-2 border-b border-current/10">
+              <BarChart3 className="h-4 w-4" />
+              <span className="font-semibold">{pollQuestion}</span>
             </div>
-            <div className="flex flex-col gap-1 pl-1">
+            <div className="flex flex-col gap-2">
               {pollOptions.map((option, index) => (
                 <div 
                   key={index} 
-                  className="text-sm opacity-80 flex items-start gap-1"
+                  className={`rounded-md px-3 py-2 ${
+                    isSent 
+                      ? "bg-primary-foreground/10 border border-primary-foreground/20" 
+                      : "bg-background/50 border border-foreground/20"
+                  }`}
                   data-testid={`poll-option-${index + 1}`}
                 >
-                  <span className="opacity-50">{index + 1}.</span>
-                  <span>{option}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${
+                      isSent 
+                        ? "bg-primary-foreground/20" 
+                        : "bg-foreground/10"
+                    }`}>
+                      {index + 1}
+                    </span>
+                    <span className="text-sm">{option}</span>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         ) : isPollResponse ? (
-          <div className="flex flex-col gap-1" data-testid={`poll-response-${messageId}`}>
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 opacity-70" />
-              <span className="text-sm font-medium">Poll Vote</span>
+          <div className="flex flex-col gap-2" data-testid={`poll-response-${messageId}`}>
+            <div className="flex items-center gap-2 pb-2 border-b border-current/10">
+              <BarChart3 className="h-4 w-4" />
+              <span className="font-semibold">Poll Vote</span>
             </div>
-            <div className="text-sm opacity-90 pl-6">
-              Selected: <span className="font-semibold">{pollResponseOption}</span>
+            <div className={`rounded-md px-3 py-2 ${
+              isSent 
+                ? "bg-primary-foreground/10 border border-primary-foreground/20" 
+                : "bg-background/50 border border-foreground/20"
+            }`}>
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4" />
+                <span className="text-sm font-semibold">{pollResponseOption}</span>
+              </div>
             </div>
             {content && content !== `[Poll Vote: ${pollResponseOption}]` && (
-              <p className="text-sm break-words whitespace-pre-wrap mt-1">
+              <p className="text-sm break-words whitespace-pre-wrap pt-1">
                 {renderContentWithLinks(content)}
               </p>
             )}

@@ -791,20 +791,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const chats = await storage.getChatsForConnection(connection_id);
 
-      const formattedChats = chats.map((chat) => ({
+      const formattedChats = await Promise.all(chats.map(async (chat) => ({
         chatId: chat.chatId,
         name: chat.lastMessage.from.replace("@s.whatsapp.net", ""),
         phoneNumber: chat.lastMessage.from.replace("@s.whatsapp.net", ""),
         lastMessage: chat.lastMessage.messageBody,
         timestamp: chat.lastMessage.timestamp,
-        unreadCount: 0,
-      }));
+        unreadCount: await storage.getUnreadCountForChat(connection_id, chat.chatId),
+      })));
 
       res.json(formattedChats);
     } catch (error) {
       console.error("Error fetching chats:", error);
       res.status(500).json({
         error: "Failed to fetch chats",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  app.patch("/api/messages/:connection_id/:chat_id/mark-read", async (req, res) => {
+    try {
+      const { connection_id, chat_id } = req.params;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      await storage.markChatMessagesAsRead(connection_id, chat_id);
+
+      res.json({ success: true, message: "Messages marked as read" });
+    } catch (error) {
+      console.error("Error marking messages as read:", error);
+      res.status(500).json({
+        error: "Failed to mark messages as read",
         message: (error as Error).message,
       });
     }

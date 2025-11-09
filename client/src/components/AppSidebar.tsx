@@ -10,8 +10,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, MessageSquare, Link2, Settings } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { LayoutDashboard, MessageSquare, Link2, Settings, Book } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useSocket } from "@/contexts/SocketContext";
 
 const menuItems = [
   {
@@ -23,6 +27,7 @@ const menuItems = [
     title: "Messages",
     url: "/messages",
     icon: MessageSquare,
+    showBadge: true,
   },
   {
     title: "Connections",
@@ -34,10 +39,64 @@ const menuItems = [
     url: "/settings",
     icon: Settings,
   },
+  {
+    title: "Developer Docs",
+    url: "/developer-docs",
+    icon: Book,
+  },
 ];
+
+interface Connection {
+  id: string;
+  connectionId: string;
+  status: string;
+}
+
+interface Chat {
+  chatId: string;
+  unreadCount: number;
+}
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { socket } = useSocket();
+  const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+
+  const { data: connections = [] } = useQuery<Connection[]>({
+    queryKey: ["/api/connections"],
+  });
+
+  const activeConnection = connections.find((c) => c.status === "connected") || connections[0];
+
+  const { data: chats = [], refetch: refetchChats } = useQuery<Chat[]>({
+    queryKey: ["/api/chats", activeConnection?.connectionId],
+    enabled: !!activeConnection,
+  });
+
+  useEffect(() => {
+    const total = chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0);
+    setTotalUnreadCount(total);
+  }, [chats]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = () => {
+      refetchChats();
+    };
+
+    const handleMessageSent = () => {
+      refetchChats();
+    };
+
+    socket.on("new-message", handleNewMessage);
+    socket.on("message-sent", handleMessageSent);
+
+    return () => {
+      socket.off("new-message", handleNewMessage);
+      socket.off("message-sent", handleMessageSent);
+    };
+  }, [socket, refetchChats]);
 
   return (
     <Sidebar>
@@ -56,6 +115,15 @@ export function AppSidebar() {
                     <Link href={item.url} data-testid={`link-${item.title.toLowerCase()}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
+                      {item.showBadge && totalUnreadCount > 0 && (
+                        <Badge 
+                          variant="default" 
+                          className="ml-auto" 
+                          data-testid="badge-unread-count"
+                        >
+                          {totalUnreadCount}
+                        </Badge>
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
