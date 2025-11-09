@@ -14,10 +14,13 @@ import type { Connection, Chat, Message } from "@/lib/api";
 import type { SendPayload } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { socketService } from "@/lib/socket";
+import { usePageTitleNotification } from "@/hooks/use-page-title-notification";
+import { useNotificationSound } from "@/hooks/use-notification-sound";
 
 export default function Messages() {
   const [activeConnection, setActiveConnection] = useState<string | null>(null);
   const [activeChat, setActiveChat] = useState<string | null>(null);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -58,6 +61,9 @@ export default function Messages() {
         if (data.chatId === activeChat) {
           queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
         }
+        
+        // Play notification sound for new messages
+        playNotificationSound();
       }
     });
 
@@ -77,7 +83,7 @@ export default function Messages() {
       socket.off("new-message");
       socket.off("message-sent");
     };
-  }, [activeConnection, activeChat, queryClient]);
+  }, [activeConnection, activeChat, queryClient, playNotificationSound]);
 
   const sendMessageMutation = useMutation({
     mutationFn: ({ to, payload }: { to: string; payload: SendPayload }) =>
@@ -125,6 +131,37 @@ export default function Messages() {
       hour12: true,
     });
   };
+
+  // Calculate total unread count
+  const totalUnreadCount = chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0);
+
+  // Use page title notification hook
+  const { resetTitle } = usePageTitleNotification(hasNewMessages && totalUnreadCount > 0, totalUnreadCount);
+  
+  // Use notification sound hook
+  const { playNotificationSound } = useNotificationSound(true);
+
+  // Detect new messages and trigger notification
+  useEffect(() => {
+    if (totalUnreadCount > 0 && document.hidden) {
+      setHasNewMessages(true);
+    }
+  }, [totalUnreadCount]);
+
+  // Reset notification when user focuses the tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        setHasNewMessages(false);
+        resetTitle();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [resetTitle]);
 
   const formattedChats = chats.map((chat) => ({
     id: chat.chatId,
