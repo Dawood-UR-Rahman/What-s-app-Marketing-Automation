@@ -56,6 +56,10 @@ export const messages = pgTable("messages", {
   mediaMetadata: text("media_metadata"),
   buttonType: text("button_type"),
   buttonsData: jsonb("buttons_data"),
+  pollQuestion: text("poll_question"),
+  pollOptions: jsonb("poll_options"),
+  pollResponseOption: text("poll_response_option"),
+  pollResponseMessageId: varchar("poll_response_message_id").references((): any => messages.id),
   quotedMessageId: varchar("quoted_message_id").references((): any => messages.id),
   buttonResponseId: text("button_response_id"),
   buttonPayload: text("button_payload"),
@@ -63,6 +67,7 @@ export const messages = pgTable("messages", {
 }, (table) => ({
   connectionReadIdx: index("messages_connection_read_idx").on(table.connectionId, table.isRead),
   quotedMessageIdx: index("messages_quoted_message_idx").on(table.quotedMessageId),
+  pollResponseMessageIdx: index("messages_poll_response_idx").on(table.pollResponseMessageId),
 }));
 
 export const insertMessageSchema = createInsertSchema(messages).omit({
@@ -131,15 +136,24 @@ export const sendButtonsPayloadSchema = z.object({
   buttons: z.array(replyButtonSchema).min(1).max(3),
 });
 
+export const sendPollPayloadSchema = z.object({
+  kind: z.literal("poll"),
+  question: z.string().min(1),
+  options: z.array(z.string().min(1)).min(2).max(12),
+  message_id: z.string().optional(),
+});
+
 export const sendPayloadSchema = z.discriminatedUnion("kind", [
   sendTextPayloadSchema,
   sendImagePayloadSchema,
   sendLinkPayloadSchema,
   sendButtonsPayloadSchema,
+  sendPollPayloadSchema,
 ]);
 
 export type SendTextPayload = z.infer<typeof sendTextPayloadSchema>;
 export type SendImagePayload = z.infer<typeof sendImagePayloadSchema>;
 export type SendLinkPayload = z.infer<typeof sendLinkPayloadSchema>;
 export type SendButtonsPayload = z.infer<typeof sendButtonsPayloadSchema>;
+export type SendPollPayload = z.infer<typeof sendPollPayloadSchema>;
 export type SendPayload = z.infer<typeof sendPayloadSchema>;
