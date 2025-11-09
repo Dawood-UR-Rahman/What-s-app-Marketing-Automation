@@ -101,6 +101,46 @@ export const messagesApi = {
     return response.data;
   },
 
+  async sendPayload(
+    connectionId: string,
+    to: string,
+    payload: import("@shared/schema").SendPayload,
+    messageId?: string
+  ): Promise<{ status: string; message_id?: string; provider_message_id?: string }> {
+    let endpoint = "";
+    let body: any = {
+      connection_id: connectionId,
+      to,
+      message_id: messageId,
+    };
+
+    switch (payload.kind) {
+      case "text":
+        endpoint = "/api/send-text";
+        body.message = payload.message;
+        break;
+      case "image":
+        endpoint = "/api/send-image";
+        body.image_url = payload.image_url;
+        body.caption = payload.caption;
+        break;
+      case "link":
+        endpoint = "/api/send-link";
+        body.message = payload.message;
+        body.link = payload.link;
+        break;
+      case "buttons":
+        endpoint = "/api/send-buttons";
+        body.text = payload.text;
+        body.footer = payload.footer;
+        body.buttons = payload.buttons;
+        break;
+    }
+
+    const response = await api.post(endpoint, body);
+    return response.data;
+  },
+
   async getMessages(connectionId: string, chatId: string, limit: number = 50): Promise<Message[]> {
     const response = await api.get(`/api/messages/${connectionId}/${chatId}`, {
       params: { limit },

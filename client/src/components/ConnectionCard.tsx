@@ -75,7 +75,8 @@ export function ConnectionCard({
             onClick={onSettings}
             data-testid={`button-settings-${connectionId}`}
           >
-            <Settings className="h-4 w-4" />
+            <Settings className="h-4 w-4 mr-2" />
+            Settings
           </Button>
           <Button
             variant="outline"

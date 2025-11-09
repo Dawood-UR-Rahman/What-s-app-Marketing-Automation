@@ -11,6 +11,7 @@ import {
 import { connectionsApi, chatsApi, messagesApi } from "@/lib/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Connection, Chat, Message } from "@/lib/api";
+import type { SendPayload } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { socketService } from "@/lib/socket";
 
@@ -79,8 +80,8 @@ export default function Messages() {
   }, [activeConnection, activeChat, queryClient]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: ({ to, message, imageUrl, productUrl }: { to: string; message: string; imageUrl?: string; productUrl?: string }) =>
-      messagesApi.send(activeConnection!, to, message, undefined, imageUrl, imageUrl ? "image" : undefined, productUrl),
+    mutationFn: ({ to, payload }: { to: string; payload: SendPayload }) =>
+      messagesApi.sendPayload(activeConnection!, to, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/messages", activeConnection, activeChat] });
       queryClient.invalidateQueries({ queryKey: ["/api/chats", activeConnection] });
@@ -97,10 +98,10 @@ export default function Messages() {
   const activeChatData = chats.find((chat) => chat.chatId === activeChat);
   const activeConnectionData = connections.find((c) => c.connectionId === activeConnection);
 
-  const handleSendMessage = (message: string, imageUrl?: string, productUrl?: string) => {
+  const handleSendMessage = (payload: SendPayload) => {
     if (!activeChat || !activeConnection) return;
     
-    sendMessageMutation.mutate({ to: activeChat, message, imageUrl, productUrl });
+    sendMessageMutation.mutate({ to: activeChat, payload });
   };
 
   const formatRelativeTime = (date: Date) => {
