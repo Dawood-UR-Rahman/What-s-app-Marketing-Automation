@@ -30,9 +30,11 @@ export interface IStorage {
   
   createMessage(message: InsertMessage): Promise<Message>;
   getMessage(id: string): Promise<Message | undefined>;
+  getMessageByProviderId(providerMessageId: string): Promise<Message | undefined>;
   getMessagesByConnectionAndChat(connectionId: string, chatId: string, limit?: number): Promise<Message[]>;
   getChatsForConnection(connectionId: string): Promise<Array<{chatId: string; lastMessage: Message}>>;
   updateMessageStatus(id: string, status: string): Promise<Message | undefined>;
+  markMessageAsRead(id: string): Promise<Message | undefined>;
   
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
   getWebhookLogs(connectionId: string, limit?: number): Promise<WebhookLog[]>;
@@ -120,6 +122,15 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
+  async getMessageByProviderId(providerMessageId: string): Promise<Message | undefined> {
+    const result = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.providerMessageId, providerMessageId))
+      .limit(1);
+    return result[0];
+  }
+
   async getMessagesByConnectionAndChat(
     connectionId: string,
     chatId: string,
@@ -157,6 +168,15 @@ export class DbStorage implements IStorage {
     const result = await db
       .update(messages)
       .set({ status })
+      .where(eq(messages.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async markMessageAsRead(id: string): Promise<Message | undefined> {
+    const result = await db
+      .update(messages)
+      .set({ isRead: true })
       .where(eq(messages.id, id))
       .returning();
     return result[0];

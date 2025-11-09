@@ -262,8 +262,36 @@ export class WhatsAppService {
       let mediaUrl: string | null = null;
       let mediaMetadata: any = null;
 
-      // Extract message content and media
-      if (msg.message.conversation) {
+      // Check for button response first
+      let buttonResponseId: string | null = null;
+      let buttonPayload: string | null = null;
+      let quotedMessageId: string | null = null;
+
+      if (msg.message.buttonsResponseMessage) {
+        buttonResponseId = msg.message.buttonsResponseMessage.selectedButtonId || null;
+        buttonPayload = msg.message.buttonsResponseMessage.selectedDisplayText || null;
+        messageBody = `[Button Response: ${buttonPayload || buttonResponseId}]`;
+        
+        const quotedStanzaId = msg.message.buttonsResponseMessage.contextInfo?.stanzaId;
+        if (quotedStanzaId) {
+          const quotedMessage = await storage.getMessageByProviderId(quotedStanzaId);
+          if (quotedMessage) {
+            quotedMessageId = quotedMessage.id;
+          }
+        }
+      } else if (msg.message.templateButtonReplyMessage) {
+        buttonResponseId = msg.message.templateButtonReplyMessage.selectedId || null;
+        buttonPayload = msg.message.templateButtonReplyMessage.selectedDisplayText || null;
+        messageBody = `[Button Response: ${buttonPayload || buttonResponseId}]`;
+        
+        const quotedStanzaId = msg.message.templateButtonReplyMessage.contextInfo?.stanzaId;
+        if (quotedStanzaId) {
+          const quotedMessage = await storage.getMessageByProviderId(quotedStanzaId);
+          if (quotedMessage) {
+            quotedMessageId = quotedMessage.id;
+          }
+        }
+      } else if (msg.message.conversation) {
         messageBody = msg.message.conversation;
       } else if (msg.message.extendedTextMessage?.text) {
         messageBody = msg.message.extendedTextMessage.text;
@@ -345,10 +373,14 @@ export class WhatsAppService {
         providerMessageId,
         status: "received",
         isSent: false,
+        isRead: false,
         clientMessageId: null,
         mediaType,
         mediaUrl,
         mediaMetadata: mediaMetadata ? JSON.stringify(mediaMetadata) : null,
+        buttonResponseId,
+        buttonPayload,
+        quotedMessageId,
       });
 
       // Emit real-time message with media to connected clients
@@ -368,8 +400,8 @@ export class WhatsAppService {
       if (webhookCallback) {
         const clientNumber = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
         
-        // Don't await - let it run in background
-        this.deliverWebhook(webhookCallback, {
+        const webhookPayload: any = {
+          message_id: savedMessage.id,
           from: clientNumber,
           message: messageBody,
           client_message_id: savedMessage.clientMessageId,
@@ -379,7 +411,21 @@ export class WhatsAppService {
           media_metadata: mediaMetadata,
           provider_message_id: providerMessageId,
           connection_id: connectionId,
-        }).catch(err => {
+          timestamp: savedMessage.timestamp.toISOString(),
+        };
+
+        if (buttonResponseId) {
+          webhookPayload.button_response = {
+            button_id: buttonResponseId,
+            button_text: buttonPayload,
+          };
+          
+          if (quotedMessageId) {
+            webhookPayload.quoted_message_id = quotedMessageId;
+          }
+        }
+        
+        this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
           console.error("Background webhook delivery failed:", err);
         });
       }
@@ -533,6 +579,81 @@ export class WhatsAppService {
       document: "application/pdf",
     };
     return mimetypes[mediaType] || "application/octet-stream";
+  }
+
+  async sendButtons(
+    connectionId: string,
+    to: string,
+    text: string,
+    buttons: Array<{ id: string; title: string }>,
+    footer?: string,
+    clientMessageId?: string
+  ): Promise<{ success: boolean; providerMessageId?: string; error?: string }> {
+    const connection = this.connections.get(connectionId);
+
+    if (!connection || connection.status !== "connected") {
+      return { success: false, error: "Connection not active" };
+    }
+
+    try {
+      const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
+
+      const buttonMessage = {
+        text: text,
+        footer: footer || "",
+        buttons: buttons.map((btn, index) => ({
+          buttonId: btn.id,
+          buttonText: { displayText: btn.title },
+          type: 1,
+        })),
+        headerType: 1,
+      };
+
+      const sentMsg = await connection.socket.sendMessage(jid, buttonMessage);
+      const providerMessageId = sentMsg?.key.id || "";
+
+      const buttonsData = {
+        text,
+        footer: footer || undefined,
+        buttons,
+      };
+
+      const savedMessage = await storage.createMessage({
+        connectionId,
+        chatId: jid,
+        from: connectionId,
+        to: jid,
+        messageBody: text,
+        clientMessageId: clientMessageId || null,
+        providerMessageId,
+        status: "sent",
+        isSent: true,
+        buttonType: "reply_buttons",
+        buttonsData: buttonsData as any,
+        mediaType: null,
+        mediaUrl: null,
+        mediaMetadata: null,
+      });
+
+      if (this.io) {
+        this.io.emit("message-sent", {
+          connectionId,
+          chatId: jid,
+          message: savedMessage,
+        });
+
+        this.io.emit("new-message", {
+          connectionId,
+          chatId: jid,
+          message: savedMessage,
+        });
+      }
+
+      return { success: true, providerMessageId };
+    } catch (error) {
+      console.error(`Error sending buttons for ${connectionId}:`, error);
+      return { success: false, error: (error as Error).message };
+    }
   }
 
   getConnection(connectionId: string): WhatsAppConnection | undefined {

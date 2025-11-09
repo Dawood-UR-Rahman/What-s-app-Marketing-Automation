@@ -5,6 +5,9 @@ import { storage } from "./storage";
 import { whatsappService } from "./whatsapp/whatsappService";
 import { z } from "zod";
 import axios from "axios";
+import { validateApiToken } from "./middleware/validateApiToken";
+import { buttonsDataSchema } from "@shared/schema";
+import { generateApiToken, hashApiToken } from "./utils/apiToken";
 
 const sendMessageSchema = z.object({
   connection_id: z.string(),
@@ -25,6 +28,46 @@ const createConnectionSchema = z.object({
 
 const updateWebhookSchema = z.object({
   webhook_url: z.string().url(),
+});
+
+const sendTextSchema = z.object({
+  connection_id: z.string(),
+  to: z.string(),
+  message: z.string(),
+  message_id: z.string().optional(),
+});
+
+const sendImageSchema = z.object({
+  connection_id: z.string(),
+  to: z.string(),
+  image_url: z.string(),
+  caption: z.string().optional(),
+  message_id: z.string().optional(),
+});
+
+const sendLinkSchema = z.object({
+  connection_id: z.string(),
+  to: z.string(),
+  message: z.string(),
+  link: z.string().url(),
+  message_id: z.string().optional(),
+});
+
+const sendButtonsSchema = z.object({
+  connection_id: z.string(),
+  to: z.string(),
+  text: z.string(),
+  footer: z.string().optional(),
+  buttons: z.array(z.object({
+    id: z.string(),
+    title: z.string().max(20),
+  })).min(1).max(3),
+  message_id: z.string().optional(),
+});
+
+const updateApiTokenSchema = z.object({
+  api_token: z.string().optional(),
+  generate_new: z.boolean().optional(),
 });
 
 function createWebhookCallback(webhookUrl: string, connectionId: string, io: SocketIOServer) {
@@ -185,7 +228,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/send-message", async (req, res) => {
+  app.post("/api/send-message", validateApiToken, async (req, res) => {
     try {
       const validatedData = sendMessageSchema.parse(req.body);
 
@@ -235,6 +278,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error sending message:", error);
       res.status(500).json({
         error: "Failed to send message",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  app.post("/api/send-text", validateApiToken, async (req, res) => {
+    try {
+      const validatedData = sendTextSchema.parse(req.body);
+      const { connection_id, to, message, message_id } = validatedData;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      if (connection.status !== "connected") {
+        return res.status(400).json({ error: "Connection not active" });
+      }
+
+      const result = await whatsappService.sendMessage(
+        connection_id,
+        to,
+        message,
+        message_id
+      );
+
+      if (result.success) {
+        return res.json({
+          status: "sent",
+          message_id: message_id || null,
+          provider_message_id: result.providerMessageId,
+        });
+      } else {
+        return res.status(500).json({
+          status: "failed",
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error sending text:", error);
+      res.status(500).json({
+        error: "Failed to send text message",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  app.post("/api/send-image", validateApiToken, async (req, res) => {
+    try {
+      const validatedData = sendImageSchema.parse(req.body);
+      const { connection_id, to, image_url, caption, message_id } = validatedData;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      if (connection.status !== "connected") {
+        return res.status(400).json({ error: "Connection not active" });
+      }
+
+      const result = await whatsappService.sendMessage(
+        connection_id,
+        to,
+        caption || "",
+        message_id,
+        image_url,
+        "image"
+      );
+
+      if (result.success) {
+        return res.json({
+          status: "sent",
+          message_id: message_id || null,
+          provider_message_id: result.providerMessageId,
+        });
+      } else {
+        return res.status(500).json({
+          status: "failed",
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error sending image:", error);
+      res.status(500).json({
+        error: "Failed to send image",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  app.post("/api/send-link", validateApiToken, async (req, res) => {
+    try {
+      const validatedData = sendLinkSchema.parse(req.body);
+      const { connection_id, to, message, link, message_id } = validatedData;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      if (connection.status !== "connected") {
+        return res.status(400).json({ error: "Connection not active" });
+      }
+
+      const fullMessage = `${message}\n\n${link}`;
+
+      const result = await whatsappService.sendMessage(
+        connection_id,
+        to,
+        fullMessage,
+        message_id
+      );
+
+      if (result.success) {
+        return res.json({
+          status: "sent",
+          message_id: message_id || null,
+          provider_message_id: result.providerMessageId,
+        });
+      } else {
+        return res.status(500).json({
+          status: "failed",
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error sending link:", error);
+      res.status(500).json({
+        error: "Failed to send link",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  app.post("/api/send-buttons", validateApiToken, async (req, res) => {
+    try {
+      const validatedData = sendButtonsSchema.parse(req.body);
+      const { connection_id, to, text, footer, buttons, message_id } = validatedData;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      if (connection.status !== "connected") {
+        return res.status(400).json({ error: "Connection not active" });
+      }
+
+      const result = await whatsappService.sendButtons(
+        connection_id,
+        to,
+        text,
+        buttons,
+        footer,
+        message_id
+      );
+
+      if (result.success) {
+        return res.json({
+          status: "sent",
+          message_id: message_id || null,
+          provider_message_id: result.providerMessageId,
+        });
+      } else {
+        return res.status(500).json({
+          status: "failed",
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error sending buttons:", error);
+      res.status(500).json({
+        error: "Failed to send interactive buttons",
         message: (error as Error).message,
       });
     }
@@ -334,6 +563,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error updating webhook:", error);
       res.status(500).json({
         error: "Failed to update webhook",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  app.patch("/api/connections/:connection_id/api-token", async (req, res) => {
+    try {
+      const { connection_id } = req.params;
+      const validatedData = updateApiTokenSchema.parse(req.body);
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      let updatedConnection;
+      let newToken: string | null = null;
+
+      if (validatedData.generate_new) {
+        const { token, hash } = generateApiToken();
+        updatedConnection = await storage.updateConnection(connection_id, {
+          apiToken: hash,
+        });
+        newToken = token;
+      } else if (validatedData.api_token === null || validatedData.api_token === "") {
+        updatedConnection = await storage.updateConnection(connection_id, {
+          apiToken: null,
+        });
+      } else if (validatedData.api_token) {
+        const hash = hashApiToken(validatedData.api_token);
+        updatedConnection = await storage.updateConnection(connection_id, {
+          apiToken: hash,
+        });
+      } else {
+        return res.status(400).json({ error: "Invalid request: provide generate_new or api_token" });
+      }
+
+      const response: any = {
+        connection_id: connection_id,
+        message: newToken 
+          ? "API token generated successfully" 
+          : validatedData.api_token === null 
+            ? "API token removed successfully"
+            : "API token updated successfully",
+      };
+
+      if (newToken) {
+        response.api_token = newToken;
+        response.warning = "Save this token securely. It cannot be retrieved again.";
+      }
+
+      res.json(response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error updating API token:", error);
+      res.status(500).json({
+        error: "Failed to update API token",
         message: (error as Error).message,
       });
     }
