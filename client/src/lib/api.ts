@@ -33,6 +33,9 @@ export interface Message {
   mediaType?: string | null;
   mediaUrl?: string | null;
   mediaMetadata?: any;
+  pollQuestion?: string | null;
+  pollOptions?: string[] | null;
+  pollResponseOption?: string | null;
 }
 
 export interface Chat {
@@ -149,6 +152,11 @@ export const messagesApi = {
         body.text = payload.text;
         body.footer = payload.footer;
         body.buttons = payload.buttons;
+        break;
+      case "poll":
+        endpoint = "/api/send-poll";
+        body.question = payload.question;
+        body.options = payload.options;
         break;
     }
 

@@ -12,6 +12,7 @@ interface MessageBubbleProps {
   mediaUrl?: string | null;
   pollQuestion?: string | null;
   pollOptions?: string[] | null;
+  pollResponseOption?: string | null;
 }
 
 function renderContentWithLinks(content: string) {
@@ -47,6 +48,7 @@ export function MessageBubble({
   mediaUrl,
   pollQuestion,
   pollOptions,
+  pollResponseOption,
 }: MessageBubbleProps) {
   const statusIcon = {
     sent: <Check className="h-3 w-3" />,
@@ -56,6 +58,7 @@ export function MessageBubble({
   };
 
   const isPoll = pollQuestion && pollOptions && pollOptions.length > 0;
+  const isPollResponse = pollResponseOption !== null && pollResponseOption !== undefined;
 
   return (
     <div
@@ -95,6 +98,21 @@ export function MessageBubble({
                 </div>
               ))}
             </div>
+          </div>
+        ) : isPollResponse ? (
+          <div className="flex flex-col gap-1" data-testid={`poll-response-${messageId}`}>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 opacity-70" />
+              <span className="text-sm font-medium">Poll Vote</span>
+            </div>
+            <div className="text-sm opacity-90 pl-6">
+              Selected: <span className="font-semibold">{pollResponseOption}</span>
+            </div>
+            {content && content !== `[Poll Vote: ${pollResponseOption}]` && (
+              <p className="text-sm break-words whitespace-pre-wrap mt-1">
+                {renderContentWithLinks(content)}
+              </p>
+            )}
           </div>
         ) : content ? (
           <p className="text-sm break-words whitespace-pre-wrap" data-testid={`text-message-content-${messageId}`}>

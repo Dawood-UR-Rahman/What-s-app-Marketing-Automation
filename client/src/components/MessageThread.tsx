@@ -13,6 +13,9 @@ interface Message {
   status?: "sent" | "delivered" | "read" | "failed";
   mediaType?: string | null;
   mediaUrl?: string | null;
+  pollQuestion?: string | null;
+  pollOptions?: string[] | null;
+  pollResponseOption?: string | null;
 }
 
 interface MessageThreadProps {
@@ -65,6 +68,9 @@ export function MessageThread({
               status={message.status}
               mediaType={message.mediaType}
               mediaUrl={message.mediaUrl}
+              pollQuestion={message.pollQuestion}
+              pollOptions={message.pollOptions}
+              pollResponseOption={message.pollResponseOption}
             />
           ))}
         </div>

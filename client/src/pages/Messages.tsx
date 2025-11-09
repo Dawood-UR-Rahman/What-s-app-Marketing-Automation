@@ -180,6 +180,9 @@ export default function Messages() {
     status: msg.status as any,
     mediaType: msg.mediaType,
     mediaUrl: msg.mediaUrl,
+    pollQuestion: msg.pollQuestion,
+    pollOptions: msg.pollOptions as string[] | null,
+    pollResponseOption: msg.pollResponseOption,
   }));
 
   return (

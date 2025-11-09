@@ -837,6 +837,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mediaType: msg.mediaType,
         mediaUrl: msg.mediaUrl,
         mediaMetadata: msg.mediaMetadata ? JSON.parse(msg.mediaMetadata) : null,
+        pollQuestion: msg.pollQuestion,
+        pollOptions: msg.pollOptions,
+        pollResponseOption: msg.pollResponseOption,
       }));
 
       res.json(formattedMessages);
@@ -883,7 +886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  await whatsappService.restoreAllConnections();
+  await whatsappService.restoreAllConnections(io, createWebhookCallback);
 
   const allConnections = await storage.getAllConnections();
   for (const conn of allConnections) {

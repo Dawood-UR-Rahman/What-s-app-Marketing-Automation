@@ -282,6 +282,8 @@ export class WhatsAppService {
       let buttonPayload: string | null = null;
       let quotedMessageId: string | null = null;
       let pollResponse: { selectedOption: string; pollMessageId?: string } | null = null;
+      let pollQuestion: string | null = null;
+      let pollOptions: string[] | null = null;
 
       if (msg.message.pollUpdateMessage) {
         const pollUpdate = msg.message.pollUpdateMessage;
@@ -290,6 +292,7 @@ export class WhatsAppService {
         if (pollCreationMessageKey?.id) {
           const originalPollMessage = await storage.getMessageByProviderId(pollCreationMessageKey.id);
           if (originalPollMessage) {
+            // Set quoted message ID to the original poll message
             quotedMessageId = originalPollMessage.id;
             
             const vote = pollUpdate.vote;
@@ -299,9 +302,10 @@ export class WhatsAppService {
               
               if (pollOptions && pollOptions[selectedIndex]) {
                 const selectedOption = pollOptions[selectedIndex];
+                // Store both the client message ID and the database ID for tracking
                 pollResponse = {
                   selectedOption,
-                  pollMessageId: originalPollMessage.clientMessageId || undefined,
+                  pollMessageId: originalPollMessage.clientMessageId || originalPollMessage.providerMessageId || undefined,
                 };
                 messageBody = `[Poll Vote: ${selectedOption}]`;
               }
@@ -398,19 +402,55 @@ export class WhatsAppService {
       } else if (msg.message.stickerMessage) {
         messageBody = "[STICKER]";
         mediaType = "sticker";
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {});
+          mediaUrl = `data:${msg.message.stickerMessage.mimetype};base64,${buffer.toString('base64')}`;
+        } catch (err) {
+          console.error("Failed to download sticker:", err);
+        }
+      } else if (msg.message.pollCreationMessage) {
+        // Handle incoming poll messages
+        const pollCreation = msg.message.pollCreationMessage;
+        pollQuestion = pollCreation.name || "";
+        pollOptions = pollCreation.options?.map((opt: any) => opt.optionName) || [];
+        messageBody = pollQuestion ? `[POLL] ${pollQuestion}` : "[POLL]";
+      } else if (msg.message.locationMessage) {
+        messageBody = "[LOCATION]";
+        mediaType = "location";
+      } else if (msg.message.contactMessage) {
+        messageBody = "[CONTACT]";
+        mediaType = "contact";
+      } else if (msg.message.liveLocationMessage) {
+        messageBody = "[LIVE LOCATION]";
+        mediaType = "location";
+      } else if (msg.message.groupInviteMessage) {
+        messageBody = "[GROUP INVITE]";
+        mediaType = "group_invite";
+      } else if (msg.message.listMessage) {
+        messageBody = "[LIST MESSAGE]";
+        mediaType = "list";
+      } else if (msg.message.listResponseMessage) {
+        messageBody = "[LIST RESPONSE]";
+        mediaType = "list_response";
       } else {
-        messageBody = "[Media or unsupported message type]";
+        // Log unhandled message types for debugging
+        const messageKeys = Object.keys(msg.message || {});
+        console.log("Unhandled message type:", messageKeys);
+        messageBody = messageKeys.length > 0 ? `[${messageKeys[0].toUpperCase()}]` : "[UNKNOWN MESSAGE TYPE]";
       }
 
       const providerMessageId = msg.key.id || "";
       const chatId = from;
+
+      // Ensure we have a message body - if poll, use poll question; if poll response, use the response message
+      const finalMessageBody = messageBody || (pollQuestion ? `[POLL] ${pollQuestion}` : (pollResponse ? `[Poll Vote: ${pollResponse.selectedOption}]` : "[MESSAGE]"));
 
       const savedMessage = await storage.createMessage({
         connectionId,
         chatId,
         from,
         to: connectionId,
-        messageBody,
+        messageBody: finalMessageBody,
         providerMessageId,
         status: "received",
         isSent: false,
@@ -422,6 +462,10 @@ export class WhatsAppService {
         buttonResponseId,
         buttonPayload,
         quotedMessageId,
+        pollQuestion: pollQuestion || null,
+        pollOptions: pollOptions && pollOptions.length > 0 ? (pollOptions as any) : null,
+        pollResponseOption: pollResponse?.selectedOption || null,
+        pollResponseMessageId: pollResponse ? quotedMessageId : null, // Reference to the original poll message
       });
 
       // Emit real-time message with media to connected clients
@@ -444,7 +488,7 @@ export class WhatsAppService {
         const webhookPayload: any = {
           message_id: savedMessage.id,
           from: clientNumber,
-          message: messageBody,
+          message: finalMessageBody,
           client_message_id: savedMessage.clientMessageId,
           client_number: clientNumber,
           media_type: mediaType,
@@ -455,6 +499,15 @@ export class WhatsAppService {
           timestamp: savedMessage.timestamp.toISOString(),
         };
 
+        // Add poll data if this is a poll message
+        if (pollQuestion && pollOptions && pollOptions.length > 0) {
+          webhookPayload.poll = {
+            question: pollQuestion,
+            options: pollOptions,
+          };
+        }
+
+        // Add poll response if this is a poll reply
         if (pollResponse) {
           webhookPayload.poll_response = {
             selected_option: pollResponse.selectedOption,
@@ -475,6 +528,7 @@ export class WhatsAppService {
           }
         }
         
+        // Deliver webhook asynchronously
         this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
           console.error("Background webhook delivery failed:", err);
         });
@@ -877,14 +931,32 @@ export class WhatsAppService {
   async disconnectConnection(connectionId: string) {
     const connection = this.connections.get(connectionId);
     if (connection) {
-      await connection.socket.logout();
+      try {
+        await connection.socket.logout();
+      } catch (error) {
+        console.error(`Error logging out connection ${connectionId}:`, error);
+      }
+      
       this.connections.delete(connectionId);
+      
+      // Remove webhook callback
+      this.webhookCallbacks.delete(connectionId);
       
       const sessionPath = path.join(this.sessionsPath, connectionId);
       if (fs.existsSync(sessionPath)) {
-        fs.rmSync(sessionPath, { recursive: true, force: true });
+        try {
+          fs.rmSync(sessionPath, { recursive: true, force: true });
+        } catch (error) {
+          console.error(`Error deleting session for ${connectionId}:`, error);
+        }
       }
 
+      await storage.updateConnection(connectionId, { 
+        status: "disconnected",
+        lastActive: new Date()
+      });
+    } else {
+      // Connection might not be in memory, but still update database
       await storage.updateConnection(connectionId, { 
         status: "disconnected",
         lastActive: new Date()
@@ -892,7 +964,7 @@ export class WhatsAppService {
     }
   }
 
-  async restoreAllConnections() {
+  async restoreAllConnections(io?: any, createWebhookCallback?: (url: string, connId: string, socketIO: any) => (data: any) => Promise<void>) {
     console.log("Restoring all WhatsApp connections...");
     const allConnections = await storage.getAllConnections();
 
@@ -903,6 +975,13 @@ export class WhatsAppService {
           try {
             await this.createConnection(conn.connectionId);
             console.log(`Restored connection: ${conn.connectionId}`);
+            
+            // Restore webhook callback if webhook URL exists and callback creator is provided
+            if (conn.webhookUrl && io && createWebhookCallback) {
+              const webhookCallback = createWebhookCallback(conn.webhookUrl, conn.connectionId, io);
+              this.registerWebhookCallback(conn.connectionId, webhookCallback);
+              console.log(`Restored webhook for connection: ${conn.connectionId}`);
+            }
           } catch (error) {
             console.error(`Failed to restore connection ${conn.connectionId}:`, error);
             await storage.updateConnection(conn.connectionId, { status: "disconnected" });
