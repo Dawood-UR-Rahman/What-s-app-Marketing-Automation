@@ -286,32 +286,9 @@ export class WhatsAppService {
       let pollOptions: string[] | null = null;
 
       if (msg.message.pollUpdateMessage) {
-        const pollUpdate = msg.message.pollUpdateMessage;
-        const pollCreationMessageKey = pollUpdate.pollCreationMessageKey;
-        
-        if (pollCreationMessageKey?.id) {
-          const originalPollMessage = await storage.getMessageByProviderId(pollCreationMessageKey.id);
-          if (originalPollMessage) {
-            // Set quoted message ID to the original poll message
-            quotedMessageId = originalPollMessage.id;
-            
-            const vote = pollUpdate.vote;
-            if (vote && vote.selectedOptions && vote.selectedOptions.length > 0) {
-              const selectedIndex = parseInt(vote.selectedOptions[0]);
-              const pollOptions = originalPollMessage.pollOptions as string[] | null;
-              
-              if (pollOptions && pollOptions[selectedIndex]) {
-                const selectedOption = pollOptions[selectedIndex];
-                // Store both the client message ID and the database ID for tracking
-                pollResponse = {
-                  selectedOption,
-                  pollMessageId: originalPollMessage.clientMessageId || originalPollMessage.providerMessageId || undefined,
-                };
-                messageBody = `[Poll Vote: ${selectedOption}]`;
-              }
-            }
-          }
-        }
+        // Poll responses are handled in messages.update event, not here
+        // Skip processing in messages.upsert to avoid duplication
+        continue;
       } else if (msg.message.buttonsResponseMessage) {
         buttonResponseId = msg.message.buttonsResponseMessage.selectedButtonId || null;
         buttonPayload = msg.message.buttonsResponseMessage.selectedDisplayText || null;
@@ -579,7 +556,7 @@ export class WhatsAppService {
                 chatId: from,
                 from,
                 to: connectionId,
-                messageBody: `[Poll Vote: ${selectedOption}]`,
+                messageBody: `[Poll Response: ${selectedOption}]`,
                 providerMessageId: `poll_vote_${Date.now()}`,
                 status: "received",
                 isSent: false,
@@ -591,6 +568,8 @@ export class WhatsAppService {
                 buttonResponseId: null,
                 buttonPayload: null,
                 quotedMessageId: pollMessage.id,
+                pollQuestion: pollMessage.pollQuestion,
+                pollOptions: pollMessage.pollOptions as any,
                 pollResponseOption: selectedOption,
                 pollResponseMessageId: pollMessage.clientMessageId,
               });
@@ -610,7 +589,7 @@ export class WhatsAppService {
                 const webhookPayload = {
                   message_id: savedMessage.id,
                   from: clientNumber,
-                  message: `[Poll Vote: ${selectedOption}]`,
+                  message: `[Poll Response: ${selectedOption}]`,
                   client_number: clientNumber,
                   provider_message_id: savedMessage.providerMessageId,
                   connection_id: connectionId,
@@ -618,6 +597,8 @@ export class WhatsAppService {
                   poll_response: {
                     selected_option: selectedOption,
                     poll_message_id: pollMessage.clientMessageId,
+                    poll_question: pollMessage.pollQuestion,
+                    poll_options: pollMessage.pollOptions,
                   },
                   quoted_message_id: pollMessage.id,
                 };

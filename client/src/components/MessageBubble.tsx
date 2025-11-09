@@ -112,11 +112,13 @@ export function MessageBubble({
             </div>
           </div>
         ) : isPollResponse ? (
-          <div className="flex flex-col gap-2" data-testid={`poll-response-${messageId}`}>
-            <div className="flex items-center gap-2 pb-2 border-b border-current/10">
-              <BarChart3 className="h-4 w-4" />
-              <span className="font-semibold">Poll Vote</span>
-            </div>
+          <div className="flex flex-col gap-3" data-testid={`poll-response-${messageId}`}>
+            {pollQuestion && (
+              <div className="flex items-center gap-2 pb-2 border-b border-current/10">
+                <BarChart3 className="h-4 w-4" />
+                <span className="font-semibold">{pollQuestion}</span>
+              </div>
+            )}
             <div className={`rounded-md px-3 py-2 ${
               isSent 
                 ? "bg-primary-foreground/10 border border-primary-foreground/20" 
@@ -124,14 +126,9 @@ export function MessageBubble({
             }`}>
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4" />
-                <span className="text-sm font-semibold">{pollResponseOption}</span>
+                <span className="text-sm font-medium">{pollResponseOption}</span>
               </div>
             </div>
-            {content && content !== `[Poll Vote: ${pollResponseOption}]` && (
-              <p className="text-sm break-words whitespace-pre-wrap pt-1">
-                {renderContentWithLinks(content)}
-              </p>
-            )}
           </div>
         ) : content ? (
           <p className="text-sm break-words whitespace-pre-wrap" data-testid={`text-message-content-${messageId}`}>
