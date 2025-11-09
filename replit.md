@@ -10,6 +10,44 @@ The system supports unlimited concurrent WhatsApp account connections, each with
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes (November 2025)
+
+### Poll Message System Enhancements
+- **Poll Display**: Polls now show in clean, bordered boxes with numbered options and clear question headers
+- **Poll Responses**: When users respond to polls, their selected option is displayed with a check icon in a visually distinct format
+- **Design Consistency**: Both polls and responses follow shadcn design patterns with primary color accents
+
+### Unread Message Tracking
+- **Server-Side Calculation**: Implemented three new storage methods to calculate unread counts:
+  - `getUnreadCountForChat()` - Returns unread count for a specific chat
+  - `getTotalUnreadCount()` - Returns total unread across all chats for a connection
+  - `markChatMessagesAsRead()` - Marks all messages in a chat as read
+- **API Updates**: `/api/chats` endpoint now returns accurate unread counts instead of hardcoded 0
+- **Mark as Read**: New PATCH endpoint `/api/messages/:connection_id/:chat_id/mark-read` automatically called when viewing chats
+- **Real-Time Updates**: Messages are marked as read both when opening a chat AND when new messages arrive in the currently active chat
+
+### Global WebSocket Provider
+- **Architecture Change**: Moved Socket.IO connection from Messages page to App level
+- **SocketProvider Context**: Created `client/src/contexts/SocketContext.tsx` wrapping entire application
+- **Global Access**: All components can now access the WebSocket connection via `useSocket()` hook
+- **Real-Time Sync**: Enables real-time updates across all pages (Dashboard, Messages, Connections, etc.)
+
+### Unread Message Counters
+- **Sidebar Badge**: Messages navigation item shows total unread count badge (green, updates in real-time)
+- **Chat List**: Each chat shows its individual unread count
+- **Live Updates**: Counters update immediately via WebSocket events when new messages arrive or are marked as read
+
+### Developer Documentation
+- **New Route**: `/developer-docs` page with comprehensive API documentation
+- **Tabbed Interface**: Five sections organized in tabs:
+  - **Overview**: Getting started guide, base URL, quick start steps, and feature list
+  - **Authentication**: API token generation and usage guide
+  - **API Endpoints**: Complete documentation of all REST endpoints with request/response examples
+  - **Webhooks**: Webhook configuration, payload structure, and callback examples for messages, polls, and buttons
+  - **WebSockets**: Real-time event documentation with Socket.IO connection examples
+- **Code Examples**: Includes curl commands, Node.js snippets, and Python examples
+- **Integration Ready**: Designed to help developers integrate with the WhatsApp Manager API
+
 ## System Architecture
 
 ### Multi-User Connection Architecture
@@ -93,17 +131,20 @@ Preferred communication style: Simple, everyday language.
 - No global state management library (Redux/Zustand) — queries handle data fetching and caching
 
 **Real-Time Updates**:
-- Socket.IO client (`lib/socket.ts`) provides singleton WebSocket connection
-- Components subscribe to Socket.IO events in useEffect hooks
+- Global SocketProvider (`contexts/SocketContext.tsx`) wraps entire application
+- Socket.IO connection initialized once at App level and shared via React Context
+- All components access socket via `useSocket()` hook
 - Query cache invalidation triggered by Socket.IO events to refetch updated data
+- Real-time sync works across all pages (not just Messages page)
 
 **Routing**: Wouter library for client-side routing (lightweight alternative to React Router)
 
 **Key Pages**:
 - `/` (Dashboard): Metrics overview and quick access to connections
-- `/messages`: Chat interface with connection selector, chat list, and message thread
+- `/messages`: Chat interface with connection selector, chat list, message thread, and real-time unread counts
 - `/connections`: Connection management with QR scanning and webhook configuration
 - `/settings`: Application preferences (API configuration)
+- `/developer-docs`: Comprehensive API documentation for developers
 
 ### UI Component System
 
@@ -127,8 +168,9 @@ Preferred communication style: Simple, everyday language.
 - `POST /api/send-message` - Send outbound message
 - `PATCH /api/connections/:connection_id/webhook` - Update webhook URL
 - `DELETE /api/connections/:connection_id` - Disconnect and remove connection
-- `GET /api/chats/:connection_id` - List chats for a connection
+- `GET /api/chats/:connection_id` - List chats for a connection (now includes accurate unread counts)
 - `GET /api/messages/:connection_id/:chat_id` - Get message history
+- `PATCH /api/messages/:connection_id/:chat_id/mark-read` - Mark all messages in a chat as read
 
 **Request/Response**: JSON format exclusively. Validation with Zod schemas for type safety.
 
