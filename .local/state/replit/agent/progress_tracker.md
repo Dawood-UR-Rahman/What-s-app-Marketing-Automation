@@ -14,3 +14,17 @@
 - ✅ Frontend loaded with React + Vite
 - ✅ WebSocket connections working
 - ✅ Application fully functional and ready to use
+
+## Poll Response Webhook Fix (November 2025)
+[x] 1. Updated webhook payload format for poll responses
+[x] 2. Added "event": "poll.response" field to webhook
+[x] 3. Changed poll question key to exact match: "poll question" (with space)
+[x] 4. Fixed chat_id to use pollMessage.chatId instead of voter JID
+[x] 5. Updated poll vote storage to preserve original chat identifier
+[x] 6. Verified poll responses display correctly in frontend
+
+### Changes Made:
+- ✅ Webhook payload now matches user's requested format exactly
+- ✅ Poll responses are saved with correct chat identifier
+- ✅ Poll question, selected option, and chat_id are all included in webhook
+- ✅ Frontend already properly displays poll responses with question and selected option
