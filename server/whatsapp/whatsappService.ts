@@ -553,7 +553,7 @@ export class WhatsAppService {
               
               const savedMessage = await storage.createMessage({
                 connectionId,
-                chatId: from,
+                chatId: pollMessage.chatId,
                 from,
                 to: connectionId,
                 messageBody: `[Poll Response: ${selectedOption}]`,
@@ -577,7 +577,7 @@ export class WhatsAppService {
               if (this.io) {
                 this.io.emit("new-message", {
                   connectionId,
-                  chatId: from,
+                  chatId: pollMessage.chatId,
                   message: savedMessage,
                 });
               }
@@ -587,20 +587,16 @@ export class WhatsAppService {
                 const clientNumber = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
                 
                 const webhookPayload = {
-                  message_id: savedMessage.id,
-                  from: clientNumber,
-                  message: `[Poll Response: ${selectedOption}]`,
-                  client_number: clientNumber,
-                  provider_message_id: savedMessage.providerMessageId,
+                  event: "poll.response",
                   connection_id: connectionId,
                   timestamp: savedMessage.timestamp.toISOString(),
-                  poll_response: {
+                  data: {
+                    message_id: savedMessage.id,
+                    from: from,
+                    "poll question": pollMessage.pollQuestion,
                     selected_option: selectedOption,
-                    poll_message_id: pollMessage.clientMessageId,
-                    poll_question: pollMessage.pollQuestion,
-                    poll_options: pollMessage.pollOptions,
+                    chat_id: savedMessage.chatId,
                   },
-                  quoted_message_id: pollMessage.id,
                 };
                 
                 this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
