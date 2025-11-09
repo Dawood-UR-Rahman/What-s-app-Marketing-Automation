@@ -656,6 +656,71 @@ export class WhatsAppService {
     }
   }
 
+  async sendPoll(
+    connectionId: string,
+    to: string,
+    question: string,
+    options: string[],
+    clientMessageId?: string
+  ): Promise<{ success: boolean; providerMessageId?: string; error?: string }> {
+    const connection = this.connections.get(connectionId);
+
+    if (!connection || connection.status !== "connected") {
+      return { success: false, error: "Connection not active" };
+    }
+
+    try {
+      const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
+
+      const pollMessage = {
+        poll: {
+          name: question,
+          values: options,
+          selectableCount: 1,
+        },
+      };
+
+      const sentMsg = await connection.socket.sendMessage(jid, pollMessage);
+      const providerMessageId = sentMsg?.key.id || "";
+
+      const savedMessage = await storage.createMessage({
+        connectionId,
+        chatId: jid,
+        from: connectionId,
+        to: jid,
+        messageBody: `[POLL] ${question}`,
+        clientMessageId: clientMessageId || null,
+        providerMessageId,
+        status: "sent",
+        isSent: true,
+        pollQuestion: question,
+        pollOptions: options as any,
+        mediaType: null,
+        mediaUrl: null,
+        mediaMetadata: null,
+      });
+
+      if (this.io) {
+        this.io.emit("message-sent", {
+          connectionId,
+          chatId: jid,
+          message: savedMessage,
+        });
+
+        this.io.emit("new-message", {
+          connectionId,
+          chatId: jid,
+          message: savedMessage,
+        });
+      }
+
+      return { success: true, providerMessageId };
+    } catch (error) {
+      console.error(`Error sending poll for ${connectionId}:`, error);
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
   getConnection(connectionId: string): WhatsAppConnection | undefined {
     return this.connections.get(connectionId);
   }

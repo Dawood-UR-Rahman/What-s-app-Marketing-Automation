@@ -469,6 +469,137 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const sendUnifiedSchema = z.object({
+    connection_id: z.string(),
+    to: z.string(),
+    text: z.string().optional(),
+    image_url: z.string().url().optional(),
+    link: z.string().url().optional(),
+    message_id: z.string().optional(),
+  });
+
+  app.post("/api/send-unified", validateApiToken, async (req, res) => {
+    try {
+      const validatedData = sendUnifiedSchema.parse(req.body);
+      const { connection_id, to, text, image_url, link, message_id } = validatedData;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      if (connection.status !== "connected") {
+        return res.status(400).json({ error: "Connection not active" });
+      }
+
+      let result;
+
+      if (image_url) {
+        result = await whatsappService.sendMessage(
+          connection_id,
+          to,
+          text || "",
+          message_id,
+          image_url,
+          "image"
+        );
+      } else if (link && text) {
+        const fullMessage = `${text}\n\n${link}`;
+        result = await whatsappService.sendMessage(
+          connection_id,
+          to,
+          fullMessage,
+          message_id
+        );
+      } else if (text) {
+        result = await whatsappService.sendMessage(
+          connection_id,
+          to,
+          text,
+          message_id
+        );
+      } else {
+        return res.status(400).json({ error: "At least one of text, image_url, or link is required" });
+      }
+
+      if (result.success) {
+        return res.json({
+          status: "sent",
+          message_id: message_id || null,
+          provider_message_id: result.providerMessageId,
+        });
+      } else {
+        return res.status(500).json({
+          status: "failed",
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error sending unified message:", error);
+      res.status(500).json({
+        error: "Failed to send message",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  const sendPollSchema = z.object({
+    connection_id: z.string(),
+    to: z.string(),
+    question: z.string().min(1),
+    options: z.array(z.string().min(1)).min(2).max(12),
+    message_id: z.string().optional(),
+  });
+
+  app.post("/api/send-poll", validateApiToken, async (req, res) => {
+    try {
+      const validatedData = sendPollSchema.parse(req.body);
+      const { connection_id, to, question, options, message_id } = validatedData;
+
+      const connection = await storage.getConnection(connection_id);
+      if (!connection) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      if (connection.status !== "connected") {
+        return res.status(400).json({ error: "Connection not active" });
+      }
+
+      const result = await whatsappService.sendPoll(
+        connection_id,
+        to,
+        question,
+        options,
+        message_id
+      );
+
+      if (result.success) {
+        return res.json({
+          status: "sent",
+          message_id: message_id || null,
+          provider_message_id: result.providerMessageId,
+        });
+      } else {
+        return res.status(500).json({
+          status: "failed",
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error sending poll:", error);
+      res.status(500).json({
+        error: "Failed to send poll",
+        message: (error as Error).message,
+      });
+    }
+  });
+
   app.post("/api/connections", async (req, res) => {
     try {
       const validatedData = createConnectionSchema.parse(req.body);
