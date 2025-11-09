@@ -266,8 +266,34 @@ export class WhatsAppService {
       let buttonResponseId: string | null = null;
       let buttonPayload: string | null = null;
       let quotedMessageId: string | null = null;
+      let pollResponse: { selectedOption: string; pollMessageId?: string } | null = null;
 
-      if (msg.message.buttonsResponseMessage) {
+      if (msg.message.pollUpdateMessage) {
+        const pollUpdate = msg.message.pollUpdateMessage;
+        const pollCreationMessageKey = pollUpdate.pollCreationMessageKey;
+        
+        if (pollCreationMessageKey?.id) {
+          const originalPollMessage = await storage.getMessageByProviderId(pollCreationMessageKey.id);
+          if (originalPollMessage) {
+            quotedMessageId = originalPollMessage.id;
+            
+            const vote = pollUpdate.vote;
+            if (vote && vote.selectedOptions && vote.selectedOptions.length > 0) {
+              const selectedIndex = parseInt(vote.selectedOptions[0]);
+              const pollOptions = originalPollMessage.pollOptions as string[] | null;
+              
+              if (pollOptions && pollOptions[selectedIndex]) {
+                const selectedOption = pollOptions[selectedIndex];
+                pollResponse = {
+                  selectedOption,
+                  pollMessageId: originalPollMessage.clientMessageId || undefined,
+                };
+                messageBody = `[Poll Vote: ${selectedOption}]`;
+              }
+            }
+          }
+        }
+      } else if (msg.message.buttonsResponseMessage) {
         buttonResponseId = msg.message.buttonsResponseMessage.selectedButtonId || null;
         buttonPayload = msg.message.buttonsResponseMessage.selectedDisplayText || null;
         messageBody = `[Button Response: ${buttonPayload || buttonResponseId}]`;
@@ -414,7 +440,16 @@ export class WhatsAppService {
           timestamp: savedMessage.timestamp.toISOString(),
         };
 
-        if (buttonResponseId) {
+        if (pollResponse) {
+          webhookPayload.poll_response = {
+            selected_option: pollResponse.selectedOption,
+            poll_message_id: pollResponse.pollMessageId,
+          };
+          
+          if (quotedMessageId) {
+            webhookPayload.quoted_message_id = quotedMessageId;
+          }
+        } else if (buttonResponseId) {
           webhookPayload.button_response = {
             button_id: buttonResponseId,
             button_text: buttonPayload,
