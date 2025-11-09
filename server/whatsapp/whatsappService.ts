@@ -168,6 +168,7 @@ export class WhatsAppService {
     });
 
     socket.ev.on("messages.update", async (updates) => {
+      console.log(`[${connectionId}] messages.update event received:`, JSON.stringify(updates, null, 2));
       await this.handleMessagesUpdate(connectionId, updates);
     });
   }
@@ -518,18 +519,30 @@ export class WhatsAppService {
     updates: Partial<BaileysEventMap["messages.update"]>
   ) {
     const connection = this.connections.get(connectionId);
-    if (!connection) return;
+    if (!connection) {
+      console.log(`[${connectionId}] Connection not found for messages.update`);
+      return;
+    }
 
+    console.log(`[${connectionId}] Processing ${updates.length} message updates`);
+    
     for (const update of updates) {
       const { key, update: msgUpdate } = update;
       
+      console.log(`[${connectionId}] Update for message ${key.id}:`, { 
+        hasPollUpdates: !!msgUpdate.pollUpdates,
+        pollUpdatesCount: msgUpdate.pollUpdates?.length || 0 
+      });
+      
       if (msgUpdate.pollUpdates) {
+        console.log(`[${connectionId}] Processing poll updates for message ${key.id}`);
         try {
           const pollMessage = await storage.getMessageByProviderId(key.id || "");
           if (!pollMessage) {
-            console.log("Poll message not found for update:", key.id);
+            console.log(`[${connectionId}] Poll message not found for update:`, key.id);
             continue;
           }
+          console.log(`[${connectionId}] Found poll message:`, pollMessage.id, pollMessage.pollQuestion);
 
           const pollCreationMessage = {
             message: {
