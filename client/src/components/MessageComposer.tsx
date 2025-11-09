@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Send, Image, Link, ListOrdered, Plus, X } from "lucide-react";
+import { Send, Image, Link, ListOrdered, Plus, X, BarChart3 } from "lucide-react";
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import type { SendPayload, ReplyButton } from "@shared/schema";
@@ -11,7 +11,7 @@ interface MessageComposerProps {
   disabled?: boolean;
 }
 
-type ComposerMode = "text" | "image" | "link" | "buttons";
+type ComposerMode = "text" | "image" | "link" | "buttons" | "poll";
 
 export function MessageComposer({ onSend, disabled = false }: MessageComposerProps) {
   const [mode, setMode] = useState<ComposerMode>("text");
@@ -22,6 +22,8 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
   const [buttonText, setButtonText] = useState("");
   const [buttonFooter, setButtonFooter] = useState("");
   const [buttons, setButtons] = useState<ReplyButton[]>([{ id: "1", title: "" }]);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState<string[]>(["", ""]);
 
   const resetForm = () => {
     setMessage("");
@@ -31,6 +33,8 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
     setButtonText("");
     setButtonFooter("");
     setButtons([{ id: "1", title: "" }]);
+    setPollQuestion("");
+    setPollOptions(["", ""]);
     setMode("text");
   };
 
@@ -69,6 +73,16 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
           });
           resetForm();
         }
+      } else if (mode === "poll" && pollQuestion.trim()) {
+        const validOptions = pollOptions.filter(opt => opt.trim());
+        if (validOptions.length >= 2 && validOptions.length <= 12) {
+          onSend({
+            kind: "poll",
+            question: pollQuestion.trim(),
+            options: validOptions.map(opt => opt.trim()),
+          });
+          resetForm();
+        }
       }
     } catch (error) {
       console.error("Error sending message:", error);
@@ -100,6 +114,24 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
     setButtons(updated);
   };
 
+  const addPollOption = () => {
+    if (pollOptions.length < 12) {
+      setPollOptions([...pollOptions, ""]);
+    }
+  };
+
+  const removePollOption = (index: number) => {
+    if (pollOptions.length > 2) {
+      setPollOptions(pollOptions.filter((_, i) => i !== index));
+    }
+  };
+
+  const updatePollOption = (index: number, value: string) => {
+    const updated = [...pollOptions];
+    updated[index] = value;
+    setPollOptions(updated);
+  };
+
   const canSend = () => {
     if (disabled) return false;
     
@@ -113,6 +145,9 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
       case "buttons":
         const validButtons = buttons.filter(b => b.title.trim());
         return buttonText.trim().length > 0 && validButtons.length >= 1 && validButtons.length <= 3;
+      case "poll":
+        const validOptions = pollOptions.filter(opt => opt.trim());
+        return pollQuestion.trim().length > 0 && validOptions.length >= 2 && validOptions.length <= 12;
       default:
         return false;
     }
@@ -263,6 +298,71 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
         </Card>
       )}
 
+      {mode === "poll" && (
+        <Card className="p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Poll / Vote</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setMode("text")}
+              data-testid="button-cancel-poll"
+            >
+              Cancel
+            </Button>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Input
+              value={pollQuestion}
+              onChange={(e) => setPollQuestion(e.target.value)}
+              placeholder="Poll question..."
+              disabled={disabled}
+              data-testid="input-poll-question"
+            />
+            <div className="flex flex-col gap-2 mt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Options (2-12)</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addPollOption}
+                  disabled={disabled || pollOptions.length >= 12}
+                  data-testid="button-add-poll-option"
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add Option
+                </Button>
+              </div>
+              {pollOptions.map((option, index) => (
+                <div key={index} className="flex gap-2 items-center">
+                  <Input
+                    value={option}
+                    onChange={(e) => updatePollOption(index, e.target.value)}
+                    placeholder={`Option ${index + 1}...`}
+                    disabled={disabled}
+                    data-testid={`input-poll-option-${index + 1}`}
+                  />
+                  {pollOptions.length > 2 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removePollOption(index)}
+                      disabled={disabled}
+                      data-testid={`button-remove-poll-option-${index + 1}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
       <div className="flex gap-2">
         {mode === "text" && (
           <>
@@ -296,13 +396,23 @@ export function MessageComposer({ onSend, disabled = false }: MessageComposerPro
             >
               <ListOrdered className="h-4 w-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMode("poll")}
+              disabled={disabled}
+              className="shrink-0"
+              data-testid="button-poll-mode"
+            >
+              <BarChart3 className="h-4 w-4" />
+            </Button>
           </>
         )}
         <Textarea
           value={mode === "text" ? message : mode === "link" ? message : ""}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyPress}
-          placeholder={mode === "text" ? "Type a message..." : mode === "image" ? "Image mode active" : mode === "link" ? "Link mode active" : "Button mode active"}
+          placeholder={mode === "text" ? "Type a message..." : mode === "image" ? "Image mode active" : mode === "link" ? "Link mode active" : mode === "buttons" ? "Button mode active" : "Poll mode active"}
           className="resize-none min-h-[44px] max-h-32 flex-1"
           rows={1}
           disabled={disabled || mode !== "text"}

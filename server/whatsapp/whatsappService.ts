@@ -6,6 +6,7 @@ import makeWASocket, {
   proto,
   fetchLatestBaileysVersion,
   downloadMediaMessage,
+  getAggregateVotesInPollMessage,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import * as fs from "fs";
@@ -91,6 +92,15 @@ export class WhatsAppService {
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
       markOnlineOnConnect: false,
+      getMessage: async (key) => {
+        if (key.id) {
+          const msg = await storage.getMessageByProviderId(key.id);
+          if (msg) {
+            return { message: {} } as any;
+          }
+        }
+        return undefined;
+      },
     });
 
     const connection: WhatsAppConnection = {
@@ -125,6 +135,7 @@ export class WhatsAppService {
       oldConnection.socket.ev.removeAllListeners("connection.update");
       oldConnection.socket.ev.removeAllListeners("creds.update");
       oldConnection.socket.ev.removeAllListeners("messages.upsert");
+      oldConnection.socket.ev.removeAllListeners("messages.update");
       await oldConnection.socket.end(undefined);
     } catch (error) {
       console.log(`Error closing old socket: ${error}`);
@@ -154,6 +165,10 @@ export class WhatsAppService {
 
     socket.ev.on("messages.upsert", async ({ messages, type }) => {
       await this.handleMessagesUpsert(connectionId, messages, type);
+    });
+
+    socket.ev.on("messages.update", async (updates) => {
+      await this.handleMessagesUpdate(connectionId, updates);
     });
   }
 
@@ -463,6 +478,105 @@ export class WhatsAppService {
         this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
           console.error("Background webhook delivery failed:", err);
         });
+      }
+    }
+  }
+
+  private async handleMessagesUpdate(
+    connectionId: string,
+    updates: Partial<BaileysEventMap["messages.update"]>
+  ) {
+    const connection = this.connections.get(connectionId);
+    if (!connection) return;
+
+    for (const update of updates) {
+      const { key, update: msgUpdate } = update;
+      
+      if (msgUpdate.pollUpdates) {
+        try {
+          const pollMessage = await storage.getMessageByProviderId(key.id || "");
+          if (!pollMessage) {
+            console.log("Poll message not found for update:", key.id);
+            continue;
+          }
+
+          const pollCreationMessage = {
+            message: {
+              pollCreationMessage: {
+                name: pollMessage.pollQuestion || "",
+                options: (pollMessage.pollOptions as string[] || []).map((opt: string) => ({ optionName: opt })),
+                selectableOptionsCount: 1,
+              },
+            },
+          };
+
+          const votes = getAggregateVotesInPollMessage({
+            message: pollCreationMessage as any,
+            pollUpdates: msgUpdate.pollUpdates,
+          });
+
+          for (const option of votes) {
+            for (const voter of option.voters) {
+              const from = voter;
+              const selectedOption = option.name;
+              
+              const savedMessage = await storage.createMessage({
+                connectionId,
+                chatId: from,
+                from,
+                to: connectionId,
+                messageBody: `[Poll Vote: ${selectedOption}]`,
+                providerMessageId: `poll_vote_${Date.now()}`,
+                status: "received",
+                isSent: false,
+                isRead: false,
+                clientMessageId: null,
+                mediaType: null,
+                mediaUrl: null,
+                mediaMetadata: null,
+                buttonResponseId: null,
+                buttonPayload: null,
+                quotedMessageId: pollMessage.id,
+                pollResponseOption: selectedOption,
+                pollResponseMessageId: pollMessage.clientMessageId,
+              });
+
+              if (this.io) {
+                this.io.emit("new-message", {
+                  connectionId,
+                  chatId: from,
+                  message: savedMessage,
+                });
+              }
+
+              const webhookCallback = this.webhookCallbacks.get(connectionId);
+              if (webhookCallback) {
+                const clientNumber = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
+                
+                const webhookPayload = {
+                  message_id: savedMessage.id,
+                  from: clientNumber,
+                  message: `[Poll Vote: ${selectedOption}]`,
+                  client_number: clientNumber,
+                  provider_message_id: savedMessage.providerMessageId,
+                  connection_id: connectionId,
+                  timestamp: savedMessage.timestamp.toISOString(),
+                  poll_response: {
+                    selected_option: selectedOption,
+                    poll_message_id: pollMessage.clientMessageId,
+                  },
+                  quoted_message_id: pollMessage.id,
+                };
+                
+                this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
+                  console.error("Background webhook delivery failed:", err);
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error processing poll update:", error);
+        }
       }
     }
   }
