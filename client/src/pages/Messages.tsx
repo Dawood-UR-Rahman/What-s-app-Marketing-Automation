@@ -24,6 +24,9 @@ export default function Messages() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Initialize notification hooks early (before useEffects that use them)
+  const { playNotificationSound } = useNotificationSound(true);
+
   const { data: connections = [] } = useQuery<Connection[]>({
     queryKey: ["/api/connections"],
   });
@@ -137,9 +140,6 @@ export default function Messages() {
 
   // Use page title notification hook
   const { resetTitle } = usePageTitleNotification(hasNewMessages && totalUnreadCount > 0, totalUnreadCount);
-  
-  // Use notification sound hook
-  const { playNotificationSound } = useNotificationSound(true);
 
   // Detect new messages and trigger notification
   useEffect(() => {
