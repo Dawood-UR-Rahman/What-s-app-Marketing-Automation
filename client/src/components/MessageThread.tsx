@@ -3,6 +3,7 @@ import { MessageComposer } from "./MessageComposer";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
+import type { SendPayload } from "@shared/schema";
 
 interface Message {
   id: string;
@@ -18,7 +19,7 @@ interface MessageThreadProps {
   chatName: string;
   phoneNumber: string;
   messages: Message[];
-  onSendMessage: (message: string, imageUrl?: string, productUrl?: string) => void;
+  onSendMessage: (payload: SendPayload) => void;
   connectionStatus?: "connected" | "disconnected" | "connecting";
 }
 

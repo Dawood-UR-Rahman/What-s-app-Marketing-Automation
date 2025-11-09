@@ -106,3 +106,40 @@ export const buttonsDataSchema = z.object({
 
 export type ReplyButton = z.infer<typeof replyButtonSchema>;
 export type ButtonsData = z.infer<typeof buttonsDataSchema>;
+
+export const sendTextPayloadSchema = z.object({
+  kind: z.literal("text"),
+  message: z.string().min(1),
+});
+
+export const sendImagePayloadSchema = z.object({
+  kind: z.literal("image"),
+  image_url: z.string().url(),
+  caption: z.string().optional(),
+});
+
+export const sendLinkPayloadSchema = z.object({
+  kind: z.literal("link"),
+  message: z.string().min(1),
+  link: z.string().url(),
+});
+
+export const sendButtonsPayloadSchema = z.object({
+  kind: z.literal("buttons"),
+  text: z.string().min(1),
+  footer: z.string().optional(),
+  buttons: z.array(replyButtonSchema).min(1).max(3),
+});
+
+export const sendPayloadSchema = z.discriminatedUnion("kind", [
+  sendTextPayloadSchema,
+  sendImagePayloadSchema,
+  sendLinkPayloadSchema,
+  sendButtonsPayloadSchema,
+]);
+
+export type SendTextPayload = z.infer<typeof sendTextPayloadSchema>;
+export type SendImagePayload = z.infer<typeof sendImagePayloadSchema>;
+export type SendLinkPayload = z.infer<typeof sendLinkPayloadSchema>;
+export type SendButtonsPayload = z.infer<typeof sendButtonsPayloadSchema>;
+export type SendPayload = z.infer<typeof sendPayloadSchema>;
