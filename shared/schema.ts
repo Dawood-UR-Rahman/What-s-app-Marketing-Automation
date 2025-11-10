@@ -58,6 +58,7 @@ export const messages = pgTable("messages", {
   buttonsData: jsonb("buttons_data"),
   pollQuestion: text("poll_question"),
   pollOptions: jsonb("poll_options"),
+  pollSelectableCount: integer("poll_selectable_count").default(1),
   pollResponseOption: text("poll_response_option"),
   pollResponseMessageId: varchar("poll_response_message_id").references((): any => messages.id),
   quotedMessageId: varchar("quoted_message_id").references((): any => messages.id),
@@ -140,6 +141,7 @@ export const sendPollPayloadSchema = z.object({
   kind: z.literal("poll"),
   question: z.string().min(1),
   options: z.array(z.string().min(1)).min(2).max(12),
+  selectable_count: z.number().int().min(1).optional().default(1),
   message_id: z.string().optional(),
 });
 

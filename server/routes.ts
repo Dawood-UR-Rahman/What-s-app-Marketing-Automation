@@ -551,13 +551,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     to: z.string(),
     question: z.string().min(1),
     options: z.array(z.string().min(1)).min(2).max(12),
+    selectable_count: z.number().int().min(1).optional().default(1),
     message_id: z.string().optional(),
   });
 
   app.post("/api/send-poll", validateApiToken, async (req, res) => {
     try {
       const validatedData = sendPollSchema.parse(req.body);
-      const { connection_id, to, question, options, message_id } = validatedData;
+      const { connection_id, to, question, options, selectable_count, message_id } = validatedData;
 
       const connection = await storage.getConnection(connection_id);
       if (!connection) {
@@ -573,6 +574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         to,
         question,
         options,
+        selectable_count || 1,
         message_id
       );
 

@@ -42,6 +42,24 @@
 [x] 7. Added "poll_message_id" field to webhook payload
 [x] 8. Updated progress tracker with all completed items marked
 
+## Poll Sending & Receiving Fixes (November 10, 2025 - Session 2)
+[x] 1. Fixed messages.upsert handler to capture BOTH incoming AND outgoing messages
+[x] 2. Added isOutgoing logic to properly identify message direction
+[x] 3. Implemented duplicate prevention for outgoing messages already saved
+[x] 4. Fixed chatId, from, and to fields for correct message routing
+[x] 5. Updated webhook logic to only trigger for incoming messages
+[x] 6. Fixed getMessage function with correct Baileys schema (selectableOptionsCount)
+[x] 7. WebSocket event emission now sends outgoing messages to frontend
+[x] 8. Tested and verified all changes work correctly
+
+### Critical Fixes Made:
+- ✅ Removed `msg.key.fromMe` filter that was blocking ALL outgoing messages
+- ✅ Outgoing polls now appear in frontend in real-time
+- ✅ Outgoing regular messages now appear in frontend in real-time
+- ✅ Poll responses will be properly aggregated using correct Baileys schema
+- ✅ Webhook payloads use proper event types and nested data structure
+- ✅ Duplicate prevention ensures outgoing messages aren't saved twice
+
 ### Final Status:
 - ✅ Application is running and fully operational
 - ✅ All dependencies installed
@@ -49,4 +67,5 @@
 - ✅ Frontend and backend both working
 - ✅ WebSocket connections established
 - ✅ Poll response webhooks working with correct format
-- ✅ Ready for use
+- ✅ Outgoing and incoming messages display in real-time
+- ✅ Ready for full poll testing

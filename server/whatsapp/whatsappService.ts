@@ -95,7 +95,20 @@ export class WhatsAppService {
       getMessage: async (key) => {
         if (key.id) {
           const msg = await storage.getMessageByProviderId(key.id);
-          if (msg) {
+          if (msg && msg.pollQuestion && msg.pollOptions) {
+            // Return poll creation message for vote aggregation - must match Baileys schema
+            // Use stored selectableCount or default to 1 for backward compatibility
+            return {
+              message: {
+                pollCreationMessage: {
+                  name: msg.pollQuestion,
+                  options: (msg.pollOptions as string[]).map((opt: string) => ({ optionName: opt })),
+                  selectableOptionsCount: msg.pollSelectableCount || 1,
+                },
+              },
+            } as any;
+          } else if (msg) {
+            // Return empty message for other message types
             return { message: {} } as any;
           }
         }
@@ -267,12 +280,16 @@ export class WhatsAppService {
     if (type !== "notify") return;
 
     for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
+      if (!msg.message) continue;
 
       const connection = this.connections.get(connectionId);
       if (!connection) continue;
 
-      const from = msg.key.remoteJid || "";
+      // Determine if this is an outgoing message
+      const isOutgoing = msg.key.fromMe || false;
+      const from = isOutgoing ? connectionId : (msg.key.remoteJid || "");
+      const chatId = msg.key.remoteJid || "";
+      
       let messageBody = "";
       let mediaType: string | null = null;
       let mediaUrl: string | null = null;
@@ -285,6 +302,7 @@ export class WhatsAppService {
       let pollResponse: { selectedOption: string; pollMessageId?: string } | null = null;
       let pollQuestion: string | null = null;
       let pollOptions: string[] | null = null;
+      let pollSelectableCount: number | null = null;
 
       if (msg.message.pollUpdateMessage) {
         // Poll responses are handled in messages.update event, not here
@@ -391,6 +409,7 @@ export class WhatsAppService {
         const pollCreation = msg.message.pollCreationMessage;
         pollQuestion = pollCreation.name || "";
         pollOptions = pollCreation.options?.map((opt: any) => opt.optionName) || [];
+        pollSelectableCount = pollCreation.selectableOptionsCount || 1;
         messageBody = pollQuestion ? `[POLL] ${pollQuestion}` : "[POLL]";
       } else if (msg.message.locationMessage) {
         messageBody = "[LOCATION]";
@@ -418,7 +437,15 @@ export class WhatsAppService {
       }
 
       const providerMessageId = msg.key.id || "";
-      const chatId = from;
+
+      // Skip if this message already exists (sent via sendPoll or sendMessage)
+      if (providerMessageId && isOutgoing) {
+        const existingMsg = await storage.getMessageByProviderId(providerMessageId);
+        if (existingMsg) {
+          console.log(`[${connectionId}] Outgoing message ${providerMessageId} already saved, skipping`);
+          continue;
+        }
+      }
 
       // Ensure we have a message body - if poll, use poll question; if poll response, use the response message
       const finalMessageBody = messageBody || (pollQuestion ? `[POLL] ${pollQuestion}` : (pollResponse ? `[Poll Vote: ${pollResponse.selectedOption}]` : "[MESSAGE]"));
@@ -427,11 +454,11 @@ export class WhatsAppService {
         connectionId,
         chatId,
         from,
-        to: connectionId,
+        to: isOutgoing ? chatId : connectionId,
         messageBody: finalMessageBody,
         providerMessageId,
-        status: "received",
-        isSent: false,
+        status: isOutgoing ? "sent" : "received",
+        isSent: isOutgoing,
         isRead: false,
         clientMessageId: null,
         mediaType,
@@ -442,6 +469,7 @@ export class WhatsAppService {
         quotedMessageId,
         pollQuestion: pollQuestion || null,
         pollOptions: pollOptions && pollOptions.length > 0 ? (pollOptions as any) : null,
+        pollSelectableCount: pollSelectableCount || null,
         pollResponseOption: pollResponse?.selectedOption || null,
         pollResponseMessageId: pollResponse ? quotedMessageId : null, // Reference to the original poll message
       });
@@ -458,58 +486,74 @@ export class WhatsAppService {
         });
       }
 
-      // Call webhook asynchronously (non-blocking)
-      const webhookCallback = this.webhookCallbacks.get(connectionId);
-      if (webhookCallback) {
-        const clientNumber = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
-        
-        const webhookPayload: any = {
-          message_id: savedMessage.id,
-          from: clientNumber,
-          message: finalMessageBody,
-          client_message_id: savedMessage.clientMessageId,
-          client_number: clientNumber,
-          media_type: mediaType,
-          media_url: mediaUrl,
-          media_metadata: mediaMetadata,
-          provider_message_id: providerMessageId,
-          connection_id: connectionId,
-          timestamp: savedMessage.timestamp.toISOString(),
-        };
-
-        // Add poll data if this is a poll message
-        if (pollQuestion && pollOptions && pollOptions.length > 0) {
-          webhookPayload.poll = {
-            question: pollQuestion,
-            options: pollOptions,
-          };
-        }
-
-        // Add poll response if this is a poll reply
-        if (pollResponse) {
-          webhookPayload.poll_response = {
-            selected_option: pollResponse.selectedOption,
-            poll_message_id: pollResponse.pollMessageId,
-          };
+      // Call webhook asynchronously (non-blocking) - only for incoming messages
+      if (!isOutgoing) {
+        const webhookCallback = this.webhookCallbacks.get(connectionId);
+        if (webhookCallback) {
+          const clientNumber = from.replace("@s.whatsapp.net", "").replace("@g.us", "");
           
-          if (quotedMessageId) {
-            webhookPayload.quoted_message_id = quotedMessageId;
+          // Determine event type
+          let eventType = "message.received";
+          if (buttonResponseId) {
+            eventType = "button.clicked";
           }
-        } else if (buttonResponseId) {
-          webhookPayload.button_response = {
-            button_id: buttonResponseId,
-            button_text: buttonPayload,
-          };
           
-          if (quotedMessageId) {
-            webhookPayload.quoted_message_id = quotedMessageId;
+          const webhookPayload: any = {
+            event: eventType,
+            connection_id: connectionId,
+            timestamp: savedMessage.timestamp.toISOString(),
+            data: {
+              message_id: savedMessage.id,
+              from: from,
+              to: connectionId,
+              chat_id: chatId,
+              message_body: finalMessageBody,
+              message_type: mediaType || "text",
+              provider_message_id: providerMessageId,
+            }
+          };
+
+          // Add poll data if this is a poll message
+          if (pollQuestion && pollOptions && pollOptions.length > 0) {
+            webhookPayload.data.poll_question = pollQuestion;
+            webhookPayload.data.poll_options = pollOptions;
           }
+
+          // Add poll response if this is a poll reply
+          if (pollResponse) {
+            webhookPayload.data.poll_response = {
+              selected_option: pollResponse.selectedOption,
+              poll_message_id: pollResponse.pollMessageId,
+            };
+            
+            if (quotedMessageId) {
+              webhookPayload.data.quoted_message_id = quotedMessageId;
+            }
+          } else if (buttonResponseId) {
+            webhookPayload.data.button_response = {
+              button_id: buttonResponseId,
+              button_text: buttonPayload,
+            };
+            
+            if (quotedMessageId) {
+              webhookPayload.data.quoted_message_id = quotedMessageId;
+            }
+          }
+
+          // Add media information if present
+          if (mediaType) {
+            webhookPayload.data.media_type = mediaType;
+            webhookPayload.data.media_url = mediaUrl;
+            if (mediaMetadata) {
+              webhookPayload.data.media_metadata = mediaMetadata;
+            }
+          }
+          
+          // Deliver webhook asynchronously
+          this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
+            console.error("Background webhook delivery failed:", err);
+          });
         }
-        
-        // Deliver webhook asynchronously
-        this.deliverWebhook(webhookCallback, webhookPayload).catch(err => {
-          console.error("Background webhook delivery failed:", err);
-        });
       }
     }
   }
@@ -855,6 +899,7 @@ export class WhatsAppService {
     to: string,
     question: string,
     options: string[],
+    selectableCount: number = 1,
     clientMessageId?: string
   ): Promise<{ success: boolean; providerMessageId?: string; error?: string }> {
     const connection = this.connections.get(connectionId);
@@ -870,7 +915,7 @@ export class WhatsAppService {
         poll: {
           name: question,
           values: options,
-          selectableCount: 1,
+          selectableCount: selectableCount,
         },
       };
 
@@ -889,6 +934,7 @@ export class WhatsAppService {
         isSent: true,
         pollQuestion: question,
         pollOptions: options as any,
+        pollSelectableCount: selectableCount,
         mediaType: null,
         mediaUrl: null,
         mediaMetadata: null,
