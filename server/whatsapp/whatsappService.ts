@@ -606,7 +606,8 @@ export class WhatsAppService {
                   data: {
                     message_id: savedMessage.id,
                     from: from,
-                    "poll question": pollMessage.pollQuestion,
+                    poll_message_id: pollMessage.providerMessageId || pollMessage.id,
+                    poll_question: pollMessage.pollQuestion,
                     selected_option: selectedOption,
                     chat_id: savedMessage.chatId,
                   },

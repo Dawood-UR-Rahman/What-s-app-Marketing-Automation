@@ -15,19 +15,22 @@
 - ✅ WebSocket connections working
 - ✅ Application fully functional and ready to use
 
-## Poll Response Webhook Fix (November 2025)
+## Poll Response Webhook Updates (November 2025)
 [x] 1. Updated webhook payload format for poll responses
 [x] 2. Added "event": "poll.response" field to webhook
-[x] 3. Changed poll question key to exact match: "poll question" (with space)
-[x] 4. Fixed chat_id to use pollMessage.chatId instead of voter JID
-[x] 5. Updated poll vote storage to preserve original chat identifier
-[x] 6. Verified poll responses display correctly in frontend
+[x] 3. Changed poll question key from "poll question" to "poll_question" (underscore format)
+[x] 4. Added "poll_message_id" field containing the original poll message ID
+[x] 5. Fixed chat_id to use pollMessage.chatId for correct chat identification
+[x] 6. Updated poll vote storage to preserve original chat identifier
+[x] 7. Verified poll responses display correctly in frontend
 
-### Changes Made:
-- ✅ Webhook payload now matches user's requested format exactly
+### Latest Changes (November 10, 2025):
+- ✅ Webhook payload key changed from "poll question" to "poll_question" (underscore)
+- ✅ Added "poll_message_id" field to webhook data
+- ✅ Webhook payload now matches user's exact requested format
 - ✅ Poll responses are saved with correct chat identifier
-- ✅ Poll question, selected option, and chat_id are all included in webhook
-- ✅ Frontend already properly displays poll responses with question and selected option
+- ✅ Poll question, selected option, poll_message_id, and chat_id all included in webhook
+- ✅ Frontend properly displays poll responses with question and selected option
 
 ## Latest Migration Session (November 10, 2025)
 [x] 1. Installed missing cross-env package
@@ -35,7 +38,9 @@
 [x] 3. Pushed database schema to create all tables
 [x] 4. Restarted workflow successfully
 [x] 5. Verified application is fully functional with screenshot
-[x] 6. Updated progress tracker with all completed items marked
+[x] 6. Updated webhook payload format to use "poll_question" with underscore
+[x] 7. Added "poll_message_id" field to webhook payload
+[x] 8. Updated progress tracker with all completed items marked
 
 ### Final Status:
 - ✅ Application is running and fully operational
@@ -43,4 +48,5 @@
 - ✅ Database configured and tables created
 - ✅ Frontend and backend both working
 - ✅ WebSocket connections established
+- ✅ Poll response webhooks working with correct format
 - ✅ Ready for use

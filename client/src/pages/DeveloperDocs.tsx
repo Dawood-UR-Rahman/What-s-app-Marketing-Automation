@@ -396,16 +396,21 @@ export default function DeveloperDocs() {
 {`{
   "event": "poll.response",
   "connection_id": "my-connection",
-  "timestamp": "2024-01-01T00:00:00.000Z",
+  "timestamp": "2025-11-10T12:00:00.000Z",
   "data": {
     "message_id": "msg_123456",
     "from": "1234567890@s.whatsapp.net",
     "poll_message_id": "poll_msg_id",
+    "poll_question": "Favorite Color?",
     "selected_option": "Blue",
     "chat_id": "1234567890@s.whatsapp.net"
   }
 }`}
                     </pre>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Triggered when a user responds to a poll. Includes the original poll question,
+                      selected option, and message identifiers. Compatible with Baileys v5+.
+                    </p>
                   </div>
 
                   <div>
